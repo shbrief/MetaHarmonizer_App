@@ -1,0 +1,38 @@
+query,stage,method,match1,match1_score,match1_source,match2,match2_score,match2_source,match3,match3_score,match3_source,match4,match4_score,match4_source,match5,match5_score,match5_source
+study_name,stage3,semantic,study_design,0.7538,study type,treatment_group,0.7475,study group,location,0.6754,study site,specimen_type,0.3973,specimen type,specimen_type_ontology_term_id,0.365,
+sample_id,invalid,id_column,,,,,,,,,,,,,,,
+age_years,stage1,alias_exact,age_at_diagnosis,1.0,age_years,,,,,,,,,,,,
+age_min,stage3,numeric,age_at_death_min,0.9217,,age_at_diagnosis_min,0.9015,,age_at_diagnosis,0.839,age,age_at_procurement_min,0.8117,,age_at_metastasis_min,0.7544,
+age_max,stage3,numeric,age_at_death_max,0.9343,,age_at_diagnosis,0.8766,age,age_at_diagnosis_max,0.8686,,age_at_procurement_max,0.8628,,age_at_death_min,0.7312,
+age_group,stage1,std_exact,age_group,1.0,,,,,,,,,,,,,
+age_group_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+biomarker,stage3,semantic,specimen_type,0.4442,biopsy type,body_site,0.4339,biopsy site,disease,0.4126,clinical diagnosis,oncotree_code,0.3904,cancer code,cancer_type,0.3903,histology
+body_site,stage1,std_exact,body_site,1.0,,,,,,,,,,,,,
+body_site_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+country,stage1,std_exact,country,1.0,,,,,,,,,,,,,
+country_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+dietary_restriction,stage3,semantic,treatment_not_applicable,0.2511,,treatment_type,0.2299,intervention,treatment_not_provided,0.2222,,disease,0.2209,disease,treatment_dose,0.1982,dosage
+feces_phenotype_metric,stage3,semantic,specimen_type,0.3298,biopsy type,disease_ontology_term_id,0.3218,,cancer_subtype_ontology_term_id,0.3165,,cancer_type_details_ontology_term_id,0.3137,,cancer_type_details,0.3107,histological subtype
+feces_phenotype_value,stage3,semantic,cancer_status,0.3325,disease status,specimen_type,0.319,biopsy type,cancer_subtype_ontology_term_id,0.3094,,cancer_type_details,0.3076,histological subtype,cancer_subtype,0.304,
+feces_phenotype_metric_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+fmt_role,stage3,semantic,treatment_type,0.3306,rt,treatment_group,0.2285,study group,sex,0.2202,gender,study_design,0.2158,study type,vital_status,0.2113,status vital
+fmt_id,invalid,id_column,,,,,,,,,,,,,,,
+sex,stage1,std_exact,sex,1.0,,,,,,,,,,,,,
+sex_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+hla,stage3,semantic,disease,0.3953,dx,treatment_status,0.3578,response,treatment_type,0.3279,xrt,location,0.297,institution,age_group,0.2869,life stage
+hla_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+smoker,stage3,semantic,treatment_name,0.3833,drug,treatment_type,0.3443,chemo,ancestry,0.308,race,vital_status,0.2814,alive dead,cancer_type,0.2813,cancer
+smoker_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+control,stage3,semantic,treatment_name,0.4629,regimen,treatment_type,0.4277,intervention,sex,0.3573,,treatment_status,0.347,response,location,0.3426,center
+control_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+target_condition,stage1,std_exact,target_condition,1.0,,,,,,,,,,,,,
+target_condition_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+disease,stage1,std_exact,disease,1.0,,,,,,,,,,,,,
+disease_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+antibiotics_current_use,stage3,semantic,treatment_dose,0.3896,drug dose,treatment_name,0.3821,medication,treatment_dose_unit,0.2951,,treatment_notes,0.2691,,treatment_type,0.2662,chemotherapy
+treatment,stage1,alias_exact,treatment_type,1.0,treatment,,,,,,,,,,,,
+treatment_ontology_term_id,invalid,id_column,,,,,,,,,,,,,,,
+tumor_staging_ajcc,invalid,stage_column,,,,,,,,,,,,,,,
+tumor_staging_tnm,invalid,stage_column,,,,,,,,,,,,,,,
+unmetadata,stage3,semantic,treatment_group,0.3277,arm,treatment_name,0.3157,drug,treatment_status,0.3129,response,treatment_type,0.3004,surgery,cancer_type,0.2926,cancer
+westernized,stage3,semantic,ancestry,0.5096,ethnic background,country,0.4715,,location,0.3845,geographic origin,ancestry_details,0.3796,ethnicity details,treatment_name,0.354,regimen
