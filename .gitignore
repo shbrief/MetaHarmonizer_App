@@ -56,3 +56,7 @@ MEETING_PREP*.md
 # Misc
 *.bak
 *.tmp
+
+# Internal architecture docs (not shipped)
+docs/
+

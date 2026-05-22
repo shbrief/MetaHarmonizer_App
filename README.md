@@ -143,20 +143,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-> **Windows note.** `pip install` of the upstream `metaharmonizer` package
-> from its git URL fails on Windows because the upstream repository ships
-> a few files whose names contain `:` (illegal in NTFS). On Windows, build
-> a wheel from a local tarball instead:
->
-> ```powershell
-> $tmp = "$env:TEMP\mh_build"; New-Item -ItemType Directory $tmp -Force | Out-Null
-> Invoke-WebRequest "https://codeload.github.com/shbrief/MetaHarmonizer/tar.gz/792eb75d4d81cb90b6480bf4e6226b781f402b11" -OutFile "$tmp\mh.tar.gz"
-> tar -xzf "$tmp\mh.tar.gz" -C $tmp --exclude='*/data/corpus/*'
-> & .\venv\Scripts\python.exe -m pip wheel "$tmp\MetaHarmonizer-792eb75d4d81cb90b6480bf4e6226b781f402b11" --no-deps -w "$tmp\dist"
-> & .\venv\Scripts\python.exe -m pip install --force-reinstall --no-deps (Get-ChildItem "$tmp\dist\metaharmonizer-*.whl")[0].FullName
-> ```
->
-> Linux / macOS / CI can install directly from `requirements.txt`.
+> **Windows users**: the upstream `metaharmonizer` package can't be installed directly from its git URL on Windows (a few files in that repo have names with `:`, which NTFS rejects). If `pip install` fails on that line, follow the short workaround in [backend/app/engine_adapter/README.md](backend/app/engine_adapter/README.md). Linux, macOS, and CI install normally.
 
 ### Frontend
 ```bash

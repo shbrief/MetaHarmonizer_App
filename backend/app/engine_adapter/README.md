@@ -9,11 +9,6 @@ engine is actually running. Routers, services, repositories and workers
 talk to a small interface (`EngineProtocol`) and stay blissfully
 ignorant. That decoupling is the whole point.
 
-For the full architectural rationale see
-[`docs/engine-adapter-architecture.md`](../../../docs/engine-adapter-architecture.md).
-For the decision record see
-[`docs/adr/0001-engine-adapter-pattern.md`](../../../docs/adr/0001-engine-adapter-pattern.md).
-
 ---
 
 ## 1. TL;DR
@@ -212,9 +207,7 @@ One allowance exists (see the script):
 
 ---
 
-## 6. Migration roadmap (where we are)
-
-From [`docs/engine-adapter-architecture.md §7`](../../../docs/engine-adapter-architecture.md):
+## 6. Migration status
 
 | Step | What | Status |
 |---|---|---|
@@ -223,7 +216,7 @@ From [`docs/engine-adapter-architecture.md §7`](../../../docs/engine-adapter-ar
 | 3 | `MetaHarmonizerAdapter` + opt-in `requirements.txt` line | Done |
 | 4 | Default flipped to `metaharmonizer` | Done |
 | 5 | `backend/engine/` and `backend/engine_upstream/` deleted | Done |
-| 6 | Pre-commit + CI + ADR | Done |
+| 6 | Pre-commit + CI | Done |
 
 Migration complete. New work goes straight into
 [`metaharmonizer_impl.py`](metaharmonizer_impl.py) or, for behaviour
@@ -256,7 +249,5 @@ which SHA the dashboard is pinned to (see `backend/requirements.txt`).
 
 ## 8. See also
 
-- [`docs/engine-adapter-architecture.md`](../../../docs/engine-adapter-architecture.md) — full design with diagrams
-- [`docs/adr/0001-engine-adapter-pattern.md`](../../../docs/adr/0001-engine-adapter-pattern.md) — decision record
 - [`scripts/check_engine_boundary.py`](../../../scripts/check_engine_boundary.py) — the rule, in code
 - Upstream engine: <https://github.com/shbrief/MetaHarmonizer>
