@@ -8,6 +8,7 @@ build/
 *.egg
 .eggs/
 *.whl
+!backend/vendor/*.whl
 
 # Virtual environments
 venv/
