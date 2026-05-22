@@ -84,11 +84,18 @@ Download results in three formats: harmonized CSV with standardized column names
 └──────────────────────┬──────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────┐
-│            MetaHarmonizer ML Engine                   │
+│         engine_adapter (EngineProtocol)              │
+│  Selectable impl via ENGINE_IMPL env var:            │
+│   - metaharmonizer  (default, pip-installed upstream)│
+│   - mock            (deterministic, used in tests)   │
+│  Single seam: only this dir may import upstream      │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│        upstream metaharmonizer package                │
 │  SchemaMapEngine (4-stage cascade)                   │
-│  SentenceTransformer embeddings                      │
-│  NCI EVS API integration                             │
-│  Dictionary + fuzzy matching                         │
+│  SentenceTransformer (all-MiniLM-L6-v2) embeddings   │
+│  NCI EVS API integration, dictionary + fuzzy match   │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -107,14 +114,16 @@ Download results in three formats: harmonized CSV with standardized column names
 
 ## Pipeline Stages
 
+Provided by the upstream `metaharmonizer` package, wrapped behind `EngineProtocol`.
+
 | Stage | Method | Description |
 |-------|--------|-------------|
-| **Stage 1** | Dict / Fuzzy | Exact and fuzzy name matching against curated standard fields and a ~220-entry alias dictionary (RapidFuzz `token_sort_ratio` ≥ 92%) |
-| **Stage 2** | Value / Ontology | Matches by value-distribution similarity via `field_value_dict.json` embeddings (SentenceTransformer cosine ≥ 0.75) and NCI EVS ontology lookups |
-| **Stage 3** | Numeric + Semantic | Numeric-family embedding matching with treatment/family boost; semantic cosine similarity across standard fields and aliases |
-| **Stage 4** | LLM | On-demand Gemini API inference for ambiguous columns (requires `GEMINI_API_KEY`) |
+| **Stage 1** | Exact dictionary match | Direct case-insensitive match against the curated standard-field list. |
+| **Stage 2** | Alias match | Looks up known synonyms in `curated_fields_source_latest_with_flags.csv`. |
+| **Stage 3** | Semantic match | SentenceTransformer (`all-MiniLM-L6-v2`) cosine similarity over field names and value samples. |
+| **Stage 4** | LLM query rewrite + FAISS re-search | Optional Gemini call to rewrite ambiguous queries, then re-rank. Off unless `GOOGLE_API_KEY` is set. |
 
-Columns flow through stages sequentially. A high-confidence match at any stage skips all later stages. Columns that pass all stages without a match are flagged for manual review or LLM rematch.
+Columns flow through stages sequentially. A high-confidence match at any stage skips later stages. Unmapped columns surface in the curator review for manual override or on-demand LLM rematch.
 
 ---
 
@@ -131,13 +140,23 @@ python -m venv venv
 venv\Scripts\activate        # Linux/macOS: source venv/bin/activate
 pip install -r requirements.txt
 
-# Offline mode (no live API calls, faster startup):
-$env:SKIP_NCI_API="1"
-# Online mode (live NCI EVS lookups):
-# $env:SKIP_NCI_API="0"
-
 uvicorn app.main:app --reload --port 8000
 ```
+
+> **Windows note.** `pip install` of the upstream `metaharmonizer` package
+> from its git URL fails on Windows because the upstream repository ships
+> a few files whose names contain `:` (illegal in NTFS). On Windows, build
+> a wheel from a local tarball instead:
+>
+> ```powershell
+> $tmp = "$env:TEMP\mh_build"; New-Item -ItemType Directory $tmp -Force | Out-Null
+> Invoke-WebRequest "https://codeload.github.com/shbrief/MetaHarmonizer/tar.gz/792eb75d4d81cb90b6480bf4e6226b781f402b11" -OutFile "$tmp\mh.tar.gz"
+> tar -xzf "$tmp\mh.tar.gz" -C $tmp --exclude='*/data/corpus/*'
+> & .\venv\Scripts\python.exe -m pip wheel "$tmp\MetaHarmonizer-792eb75d4d81cb90b6480bf4e6226b781f402b11" --no-deps -w "$tmp\dist"
+> & .\venv\Scripts\python.exe -m pip install --force-reinstall --no-deps (Get-ChildItem "$tmp\dist\metaharmonizer-*.whl")[0].FullName
+> ```
+>
+> Linux / macOS / CI can install directly from `requirements.txt`.
 
 ### Frontend
 ```bash
@@ -158,9 +177,10 @@ npm run dev
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SKIP_NCI_API` | `0` | Set to `1` to bypass live NCI EVS API calls (offline / fast mode) |
-| `GEMINI_API_KEY` | — | Required for Stage 4 LLM matching and `/api/v1/mappings/{id}/llm` |
-| `FIELD_VALUE_JSON` | `data/schema/field_value_dict.json` | Override path to value-level ontology dictionary |
+| `ENGINE_IMPL` | `metaharmonizer` | Select the engine adapter. `mock` switches to the deterministic in-process engine used by tests. |
+| `METAHARMONIZER_DATA_DIR` | `backend/data` | Where the upstream package looks for `schema/ncit_descendants.json`, `schema/field_value_dict.json`, and `schema/curated_fields_source_latest_with_flags.csv`. The adapter auto-points here when unset. |
+| `GOOGLE_API_KEY` | — | Required to enable upstream Stage 4 LLM query rewriting (Gemini). |
+| `FIELD_VALUE_JSON` | `backend/data/schema/field_value_dict.json` | Override path to the dashboard-owned value-level ontology dictionary. |
 
 ---
 
@@ -213,14 +233,15 @@ metaHarmonizer/
 │   │   ├── models.py            # Pydantic request/response schemas
 │   │   ├── database.py          # SQLite data layer
 │   │   ├── routers/             # API route handlers
-│   │   └── services/            # Business logic
-│   ├── engine/                  # ML engine (SchemaMapEngine)
-│   │   ├── src/models/schema_mapper/
-│   │   │   ├── engine.py        # 4-stage cascade
-│   │   │   ├── config.py        # Thresholds & model config
-│   │   │   ├── loaders/         # Dictionary & value loaders
-│   │   │   └── matchers/        # Stage 1–4 matcher classes
-│   │   └── data/schema/         # Curated dictionaries & ontology data
+│   │   ├── services/            # Dashboard-owned helpers (ontology, IDs)
+│   │   └── engine_adapter/      # ONLY layer allowed to import upstream
+│   │       ├── protocol.py      # EngineProtocol contract
+│   │       ├── metaharmonizer_impl.py  # Wraps pip-installed upstream pkg
+│   │       └── mock_impl.py     # Deterministic engine for tests
+│   ├── data/
+│   │   ├── schema/              # Curated dicts shipped to the engine
+│   │   ├── uploads/             # User-uploaded CSVs (gitignored)
+│   │   └── metaharmonizer.db    # Runtime SQLite (gitignored)
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/

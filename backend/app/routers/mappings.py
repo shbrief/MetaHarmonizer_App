@@ -139,10 +139,11 @@ async def llm_rematch(mapping_id: int):
     if not study or not study.get("file_path"):
         raise HTTPException(status_code=404, detail="Study CSV not found")
 
-    from app.services.harmonizer import run_llm_match_for_column
+    from app.engine_adapter import get_engine
 
+    engine = get_engine()
     try:
-        suggestions = run_llm_match_for_column(
+        suggestions = engine.llm_match(
             csv_path=study["file_path"],
             raw_column=mapping["raw_column"],
         )

@@ -9,3 +9,15 @@ sentence-transformers==3.0.1
 torch>=2.1.0
 requests>=2.31.0
 google-genai>=1.0.0
+
+# --- ML engine ------------------------------------------------------------
+# Default ML engine: the pip-installable upstream package
+# (ENGINE_IMPL=metaharmonizer — see backend/app/engine_adapter/__init__.py).
+# Always pinned to a commit SHA, never `main`. See:
+#   docs/engine-adapter-architecture.md  §4
+#   backend/app/engine_adapter/README.md
+#
+# To temporarily fall back to the previous in-repo copy (kept only during the
+# transition window), set ENGINE_IMPL=vendored. The vendored copy will be
+# removed after the metaharmonizer adapter has been validated in CI.
+metaharmonizer @ git+https://github.com/shbrief/MetaHarmonizer@792eb75d4d81cb90b6480bf4e6226b781f402b11

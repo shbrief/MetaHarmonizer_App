@@ -1,0 +1,15 @@
+# See https://pre-commit.com for hook configuration.
+# Install with: pip install pre-commit && pre-commit install
+
+repos:
+  - repo: local
+    hooks:
+      - id: no-engine-leaks
+        name: forbid engine imports outside engine_adapter
+        description: |
+          Only backend/app/engine_adapter/ may import `metaharmonizer`,
+          `src.*`, or `engine.src.*`. See docs/engine-adapter-architecture.md.
+        entry: python scripts/check_engine_boundary.py
+        language: system
+        files: ^backend/app/.*\.py$
+        pass_filenames: true

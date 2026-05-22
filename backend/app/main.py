@@ -19,13 +19,13 @@ async def lifespan(app: FastAPI):
     """Initialise database and pre-warm the ML engine on startup."""
     init_db()
 
-    # Pre-warm SchemaMapEngine in a background thread so the server
+    # Pre-warm the selected engine in a background thread so the server
     # starts accepting requests immediately.  The engine loads the
     # SentenceTransformer model (~90 MB) and dictionaries once;
     # subsequent /harmonize uploads reuse the cached engine.
     def _warm():
-        from app.services.harmonizer import pre_warm
-        pre_warm()
+        from app.engine_adapter import get_engine
+        get_engine().pre_warm()
 
     t = threading.Thread(target=_warm, daemon=True)
     t.start()
@@ -71,3 +71,11 @@ async def root():
 @app.get("/health", tags=["health"])
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/health/engine", tags=["health"])
+async def health_engine():
+    """Report which engine adapter is active and whether it is ready."""
+    from app.engine_adapter import get_engine
+
+    return get_engine().health().model_dump()

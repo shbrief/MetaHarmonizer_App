@@ -14,15 +14,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app import database as db
+from app.engine_adapter import EngineProtocol, get_engine
 from app.models import HarmonizeResponse, StudyOut
-from app.services.harmonizer import (
-    generate_study_id,
-    run_ontology_mapping,
-    run_schema_mapping,
-)
+from app.services.harmonizer import generate_study_id
 
 router = APIRouter(prefix="/api/v1", tags=["harmonize"])
 
@@ -35,7 +32,10 @@ CURATED_PATH = (
 
 
 @router.post("/harmonize", response_model=HarmonizeResponse)
-async def harmonize_study(file: UploadFile = File(...)):
+async def harmonize_study(
+    file: UploadFile = File(...),
+    engine: EngineProtocol = Depends(get_engine),
+):
     """Upload a clinical metadata file and run the full harmonization pipeline."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -82,15 +82,15 @@ async def harmonize_study(file: UploadFile = File(...)):
     )
     db.update_study_status(study_id, "processing")
 
-    # Run schema mapping pipeline (pass csv_path for real SchemaMapEngine)
+    # Run schema mapping pipeline — engine is selected by ENGINE_IMPL env var
     t0 = time.perf_counter()
-    schema_results = run_schema_mapping(raw_df, curated_df, csv_path=str(save_path))
+    schema_results = engine.harmonize_schema(raw_df, curated_df, csv_path=str(save_path))
     t_schema = time.perf_counter() - t0
     db.insert_mappings(study_id, schema_results)
 
     # Run ontology value mapping
     t1 = time.perf_counter()
-    onto_results = run_ontology_mapping(raw_df, schema_results)
+    onto_results = engine.map_values(raw_df, schema_results)
     if onto_results:
         db.insert_ontology_mappings(study_id, onto_results)
     t_onto = time.perf_counter() - t1

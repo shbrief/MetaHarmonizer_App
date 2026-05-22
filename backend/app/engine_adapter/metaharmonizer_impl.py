@@ -1,0 +1,224 @@
+"""
+MetaHarmonizerAdapter — wraps the upstream pip-installable
+``metaharmonizer`` package (https://github.com/shbrief/MetaHarmonizer).
+
+THIS IS THE ONLY FILE IN THE PROJECT ALLOWED TO ``import metaharmonizer``.
+The pre-commit hook ``scripts/check_engine_boundary.py`` enforces that.
+
+To enable this adapter:
+
+  1. Add the dependency (commit-pinned) to ``backend/requirements.txt``::
+
+       metaharmonizer @ git+https://github.com/shbrief/MetaHarmonizer@<sha>
+
+  2. ``pip install -r backend/requirements.txt``
+  3. Set ``ENGINE_IMPL=metaharmonizer`` in the environment.
+
+Until step 1 is done this module raises a clear error on first use; the
+default ``VendoredAdapter`` keeps the app running.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from .types import EngineHealth
+
+
+_INSTALL_HINT = (
+    "The 'metaharmonizer' package is not installed. Add\n"
+    "  metaharmonizer @ git+https://github.com/shbrief/MetaHarmonizer@<sha>\n"
+    "to backend/requirements.txt, then `pip install -r backend/requirements.txt`."
+)
+
+# Upstream looks for schema files (ncit_descendants.json, field_value_dict.json,
+# curated_fields*.csv) under ``$METAHARMONIZER_DATA_DIR/schema/``. If the host
+# hasn't set the env var, fall back to the dashboard-owned copy at
+# ``backend/data/`` so a fresh checkout works without manual config.
+def _ensure_upstream_data_dir() -> None:
+    if os.environ.get("METAHARMONIZER_DATA_DIR"):
+        return
+    here = Path(__file__).resolve()
+    backend_data = here.parents[2] / "data"  # backend/data
+    if (backend_data / "schema" / "ncit_descendants.json").exists():
+        os.environ["METAHARMONIZER_DATA_DIR"] = str(backend_data)
+
+
+def _require_pkg():
+    try:
+        _ensure_upstream_data_dir()
+        import metaharmonizer  # noqa: F401  ← the one allowed import
+        return metaharmonizer
+    except ImportError as exc:  # pragma: no cover — environment-dependent
+        raise RuntimeError(_INSTALL_HINT) from exc
+
+
+class MetaHarmonizerAdapter:
+    """Wraps the upstream pip-installed engine."""
+
+    name = "metaharmonizer"
+
+    def __init__(self, *, mode: str | None = None, top_k: int = 5):
+        # Mode is "auto" (LLM enabled when GEMINI_API_KEY present) or "manual".
+        if mode is None:
+            mode = "auto" if os.getenv("GEMINI_API_KEY") else "manual"
+        self._mode = mode
+        self._top_k = top_k
+
+    # ------------------------------------------------------------------
+    @lru_cache(maxsize=8)
+    def _engine_for(self, csv_path: str):
+        pkg = _require_pkg()
+        # Upstream layout (subject to change — adjust here, never in routers):
+        SchemaMapEngine = pkg.SchemaMapEngine  # type: ignore[attr-defined]
+        return SchemaMapEngine(
+            clinical_data_path=csv_path,
+            mode=self._mode,
+            top_k=self._top_k,
+        )
+
+    # ------------------------------------------------------------------
+    # EngineProtocol methods
+    # ------------------------------------------------------------------
+    def harmonize_schema(
+        self,
+        raw_df: pd.DataFrame,
+        curated_df: pd.DataFrame,
+        *,
+        csv_path: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not csv_path:
+            raise ValueError("metaharmonizer adapter requires csv_path")
+        engine = self._engine_for(csv_path)
+        raw = engine.run_schema_mapping()
+        return [self._to_dashboard_row(r) for r in raw.to_dict(orient="records")]
+
+    def map_values(
+        self,
+        raw_df: pd.DataFrame,
+        schema_mappings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        # Value-to-ontology mapping is dashboard-owned (curated dictionaries
+        # + NCI EVS cache) and lives in ``app.services.harmonizer``. The
+        # upstream package ships an ``OntoMapEngine`` (FAISS + SQLite) we may
+        # route through later; until that's evaluated we keep the existing
+        # deterministic behaviour so the API contract is unchanged.
+        from app.services.harmonizer import run_ontology_mapping
+
+        return run_ontology_mapping(raw_df, schema_mappings)
+
+    def llm_match(self, csv_path: str, raw_column: str) -> list[dict[str, Any]]:
+        if not os.getenv("GEMINI_API_KEY"):
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. Add it to the backend .env to use "
+                "on-demand LLM matching."
+            )
+        pkg = _require_pkg()
+        LLMMatcher = pkg.LLMMatcher  # type: ignore[attr-defined]
+        engine = self._engine_for(csv_path)
+        matcher = LLMMatcher(engine)
+        return [
+            {"field": f, "confidence": round(float(s), 4), "reasoning": src}
+            for (f, s, src) in matcher.match(raw_column)
+        ]
+
+    def pre_warm(self) -> None:
+        # Touch the package so the import cost is paid at startup, not
+        # on the first user request.
+        _require_pkg()
+
+    def health(self) -> EngineHealth:
+        try:
+            pkg = _require_pkg()
+            version = getattr(pkg, "__version__", "unknown")
+            return EngineHealth(
+                ok=True,
+                name=self.name,
+                version=str(version),
+                loaded_models=["all-MiniLM-L6-v2"],
+            )
+        except RuntimeError as exc:
+            return EngineHealth(
+                ok=False,
+                name=self.name,
+                version="not-installed",
+                warnings=[str(exc)],
+            )
+
+    # ------------------------------------------------------------------
+    # Translation — the ONE place that knows upstream column names.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _is_missing(value: Any) -> bool:
+        """True for None, empty string, or NaN float (NaN never equals itself)."""
+        if value is None or value == "":
+            return True
+        if isinstance(value, float) and math.isnan(value):
+            return True
+        return False
+
+    @staticmethod
+    def _to_score(value: Any) -> float:
+        """Coerce a possibly-missing/NaN score to a finite float in [0, 1]."""
+        if MetaHarmonizerAdapter._is_missing(value):
+            return 0.0
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if math.isnan(f) or math.isinf(f):
+            return 0.0
+        return f
+
+    @staticmethod
+    def _to_dashboard_row(raw: dict[str, Any]) -> dict[str, Any]:
+        """Map one upstream row dict to the dashboard's expected shape."""
+        match1 = raw.get("match1")
+        matched_field = None if MetaHarmonizerAdapter._is_missing(match1) else str(match1)
+        confidence = MetaHarmonizerAdapter._to_score(raw.get("match1_score"))
+
+        alternatives = []
+        for i in range(2, 6):
+            m = raw.get(f"match{i}")
+            if MetaHarmonizerAdapter._is_missing(m):
+                continue
+            alternatives.append(
+                {
+                    "field": str(m),
+                    "score": round(
+                        MetaHarmonizerAdapter._to_score(raw.get(f"match{i}_score")), 4
+                    ),
+                    "method": str(raw.get("method", "")),
+                }
+            )
+
+        stage_raw = raw.get("stage")
+        stage = "unmapped" if MetaHarmonizerAdapter._is_missing(stage_raw) else str(stage_raw)
+        if stage == "invalid":
+            status = "rejected"
+        elif confidence >= 0.90:
+            status = "accepted"
+        else:
+            status = "pending"
+
+        method_raw = raw.get("method", "")
+        method = "" if MetaHarmonizerAdapter._is_missing(method_raw) else str(method_raw)
+
+        query_raw = raw.get("query", "")
+        query = "" if MetaHarmonizerAdapter._is_missing(query_raw) else str(query_raw)
+
+        return {
+            "raw_column": query,
+            "matched_field": matched_field,
+            "confidence_score": round(confidence, 4),
+            "stage": stage,
+            "method": method,
+            "alternatives": alternatives,
+            "status": status,
+        }

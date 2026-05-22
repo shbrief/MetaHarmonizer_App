@@ -38,19 +38,15 @@ backend/data/metaharmonizer.db
 backend/data/nci_cache.json
 !backend/data/uploads/.gitkeep
 
-# ML engine data (large model files, outputs)
-backend/engine/data/outputs/
-backend/engine/data/corpus/
-backend/engine/src/__pycache__/
-backend/engine/**/__pycache__/
-backend/engine/*.egg-info/
-backend/engine/.git-crypt/
+# Generated evaluation outputs (timestamped runs)
+backend/data/schema_mapping_eval/*_s[0-9]_*_manual_*.csv
 
 # Build artifacts
 *.tsbuildinfo
 
 # Personal / local-only documents
 GSoC_Proposal.md
+GSOC_Proposal.pdf
 SYSTEM_OVERVIEW.md
 MEETING_PREP*.md
 

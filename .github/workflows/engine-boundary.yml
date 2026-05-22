@@ -1,0 +1,51 @@
+name: engine-boundary
+
+# Enforces the engine-adapter import boundary in CI.
+# See docs/engine-adapter-architecture.md §5.1
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "backend/app/**"
+      - "scripts/check_engine_boundary.py"
+      - ".github/workflows/engine-boundary.yml"
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check engine import boundary
+        run: python scripts/check_engine_boundary.py
+
+  mock-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi pydantic pandas
+      - name: Import smoke test (MockEngineAdapter)
+        env:
+          ENGINE_IMPL: mock
+        working-directory: backend
+        run: |
+          python -c "
+          from app.engine_adapter import get_engine
+          import pandas as pd
+          e = get_engine()
+          assert e.name == 'mock'
+          rows = e.harmonize_schema(pd.DataFrame({'AGE': [1]}), pd.DataFrame({'age': []}))
+          assert rows and rows[0]['raw_column'] == 'AGE'
+          print('mock adapter OK')
+          "
