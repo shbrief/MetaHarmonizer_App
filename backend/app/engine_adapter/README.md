@@ -128,23 +128,15 @@ The mock runs in ~1 ms per call.
 
 ### 4.4 "I want to upgrade to a newer upstream SHA"
 
-1. Open [`backend/requirements.txt`](../../requirements.txt) and bump the
-   SHA in `metaharmonizer @ git+https://github.com/shbrief/MetaHarmonizer@<sha>`.
-2. `pip install -r backend/requirements.txt`
-3. Restart uvicorn and visit `http://localhost:8000/health/engine` —
+1. Rebuild the vendored wheel — see [`backend/vendor/README.md`](../../vendor/README.md) for the exact commands.
+2. Move the new `.whl` into `backend/vendor/`, delete the old one, and update the filename in [`backend/requirements.txt`](../../requirements.txt) if the version bumped.
+3. `pip install -r backend/requirements.txt --force-reinstall --no-deps ./vendor/metaharmonizer-<ver>-py3-none-any.whl`
+4. Restart uvicorn and visit `http://localhost:8000/health/engine` —
    it should report `{"name": "metaharmonizer", "ok": true, "version": "…"}`.
-4. Run a smoke harmonize against `metadata_samples/new_meta.csv`. If a
+5. Run a smoke harmonize against `metadata_samples/new_meta.csv`. If a
    field name changed upstream, fix `_to_dashboard_row` in
    [`metaharmonizer_impl.py`](metaharmonizer_impl.py) — that's the only
    file allowed to know upstream column names.
-
-> Windows note: `pip install` straight from the GitHub URL currently
-> fails because the upstream repo ships data files whose names contain
-> `:` (illegal on NTFS). If you need to install from a fresh clone on
-> Windows, do the equivalent of
-> `git clone --no-checkout`, sparse-checkout-exclude `data/corpus/`,
-> then `pip wheel . -w dist/` and install the resulting wheel. Linux/
-> macOS hosts (and CI) install straight from the git URL.
 
 ### 4.5 "I want to debug into the engine"
 

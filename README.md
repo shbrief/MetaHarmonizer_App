@@ -143,7 +143,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-> **Windows users**: the upstream `metaharmonizer` package can't be installed directly from its git URL on Windows (a few files in that repo have names with `:`, which NTFS rejects). If `pip install` fails on that line, follow the short workaround in [backend/app/engine_adapter/README.md](backend/app/engine_adapter/README.md). Linux, macOS, and CI install normally.
+The upstream `metaharmonizer` engine is installed from a pre-built wheel under [backend/vendor/](backend/vendor/README.md) so installation works on Windows, Linux and macOS without any special steps.
 
 ### Frontend
 ```bash
