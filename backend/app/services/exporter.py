@@ -12,6 +12,8 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
+import zipfile
 from typing import Any
 
 import pandas as pd
@@ -19,9 +21,43 @@ import pandas as pd
 from app import database as db
 
 
+# cBioPortal auto-populates these; they must not appear in a clinical data file.
+BANNED_ATTRS: set[str] = {"MUTATION_COUNT", "FRACTION_GENOME_ALTERED"}
+
+# cBioPortal IDs allow only letters, numbers, points, underscores and hyphens.
+_ID_INVALID = re.compile(r"[^A-Za-z0-9._-]")
+
+# Survival *_STATUS values must be prefixed 0: (no event) or 1: (event).
+_SURVIVAL_PREFIX: dict[str, str] = {
+    "LIVING": "0:LIVING",
+    "ALIVE": "0:LIVING",
+    "DECEASED": "1:DECEASED",
+    "DEAD": "1:DECEASED",
+    "DISEASEFREE": "0:DiseaseFree",
+    "DISEASE FREE": "0:DiseaseFree",
+    "RECURRED": "1:Recurred/Progressed",
+    "PROGRESSED": "1:Recurred/Progressed",
+    "RECURRED/PROGRESSED": "1:Recurred/Progressed",
+}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _sanitize_id(value: Any) -> str:
+    """Coerce a value into a cBioPortal-legal ID (letters, numbers, . _ -)."""
+    text = "" if value is None else str(value)
+    return _ID_INVALID.sub("_", text)
+
+
+def _normalize_survival(value: Any) -> str:
+    """Prefix a survival-status value with 0:/1: if it isn't already."""
+    text = "" if value is None else str(value).strip()
+    if not text or text[:2] in ("0:", "1:"):
+        return text
+    return _SURVIVAL_PREFIX.get(text.upper(), text)
 
 def _find_id_column(df: pd.DataFrame, candidates: list[str]) -> str:
     """
@@ -133,6 +169,10 @@ def export_cbioportal(study_id: str, raw_df: pd.DataFrame) -> str:
 
         target_id = target.upper().replace(" ", "_")
 
+        # Skip banned (auto-populated) attributes
+        if target_id in BANNED_ATTRS:
+            continue
+
         # Skip duplicate target columns
         if target_id in seen_targets:
             continue
@@ -218,22 +258,94 @@ def export_cbioportal(study_id: str, raw_df: pd.DataFrame) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
 
+    def _header_row(values: list[str]) -> None:
+        # Per spec, only the FIRST field of each metadata row carries the '#'.
+        row = list(values)
+        if row:
+            row[0] = "#" + row[0]
+        writer.writerow(row)
+
     # Row 1: Display names
-    writer.writerow(["#" + c["display"] for c in cols])
+    _header_row([c["display"] for c in cols])
     # Row 2: Descriptions (distinct from display names per spec)
-    writer.writerow(["#" + c["description"] for c in cols])
+    _header_row([c["description"] for c in cols])
     # Row 3: Data types
-    writer.writerow(["#" + c["dtype"] for c in cols])
+    _header_row([c["dtype"] for c in cols])
     # Row 4: Priority
-    writer.writerow(["#" + str(c["priority"]) for c in cols])
+    _header_row([str(c["priority"]) for c in cols])
 
     # Row 5: Column attribute IDs (no # prefix, UPPER_CASE)
     writer.writerow([c["target"] for c in cols])
 
-    # Row 6+: Data rows
+    # Row 6+: Data rows, with per-column value normalization
     for _, row in raw_df.iterrows():
-        writer.writerow([row.get(c["raw"], "") for c in cols])
+        out_row: list[str] = []
+        for c in cols:
+            raw_val = row.get(c["raw"], "")
+            target_id = c["target"]
+            if target_id in ("PATIENT_ID", "SAMPLE_ID"):
+                out_row.append(_sanitize_id(raw_val))
+            elif target_id.endswith("_STATUS") and f"{target_id[:-7]}_MONTHS" in seen_targets:
+                out_row.append(_normalize_survival(raw_val))
+            else:
+                out_row.append("" if raw_val is None else str(raw_val))
+        writer.writerow(out_row)
 
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# cBioPortal study folder (validateData.py-ready)
+# ---------------------------------------------------------------------------
+
+def _meta_study(cancer_study_identifier: str, name: str, description: str) -> str:
+    return (
+        f"type_of_cancer: mixed\n"
+        f"cancer_study_identifier: {cancer_study_identifier}\n"
+        f"name: {name}\n"
+        f"description: {description}\n"
+        f"add_global_case_list: true\n"
+    )
+
+
+def _meta_clinical_sample(cancer_study_identifier: str) -> str:
+    return (
+        f"cancer_study_identifier: {cancer_study_identifier}\n"
+        f"genetic_alteration_type: CLINICAL\n"
+        f"datatype: SAMPLE_ATTRIBUTES\n"
+        f"data_filename: data_clinical_sample.txt\n"
+    )
+
+
+def export_cbioportal_study(
+    study_id: str,
+    raw_df: pd.DataFrame,
+    cancer_study_identifier: str | None = None,
+) -> bytes:
+    """
+    Produce a cBioPortal study folder as a zip, ready for ``validateData.py``:
+
+        meta_study.txt
+        meta_clinical_sample.txt
+        data_clinical_sample.txt
+
+    ``validateData.py`` validates a study directory with meta files, not a lone
+    TSV, so this is the artifact a curator actually runs the validator against.
+    """
+    study = db.get_study(study_id) or {}
+    identifier = cancer_study_identifier or _sanitize_id(
+        study.get("name") or study_id
+    ).lower()
+    name = study.get("name") or study_id
+    description = study.get("description") or f"Harmonized clinical data for {name}."
+
+    data_clinical_sample = export_cbioportal(study_id, raw_df)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("meta_study.txt", _meta_study(identifier, name, description))
+        zf.writestr("meta_clinical_sample.txt", _meta_clinical_sample(identifier))
+        zf.writestr("data_clinical_sample.txt", data_clinical_sample)
     return buf.getvalue()
 
 

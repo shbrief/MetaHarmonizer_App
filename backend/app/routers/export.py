@@ -10,11 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 
 from app import database as db
 from app.services.exporter import (
     export_cbioportal,
+    export_cbioportal_study,
     export_harmonized_csv,
     export_mapping_report,
 )
@@ -59,6 +60,20 @@ async def export_cbioportal_format(study_id: str):
         media_type="text/tab-separated-values",
         headers={
             "Content-Disposition": f"attachment; filename=data_clinical_{study_id}.txt"
+        },
+    )
+
+
+@router.get("/{study_id}/cbioportal-study")
+async def export_cbioportal_study_folder(study_id: str):
+    """Export a validateData.py-ready cBioPortal study folder (zip with meta files)."""
+    raw_df = _load_raw_df(study_id)
+    zip_bytes = export_cbioportal_study(study_id, raw_df)
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename={study_id}_cbioportal_study.zip"
         },
     )
 
