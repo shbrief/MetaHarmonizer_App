@@ -1,7 +1,8 @@
 """
 MetaHarmonizer Dashboard — FastAPI Application
 
-Main entry point. Registers all routers and initialises the database.
+Main entry point. Configures logging, the unified error envelope + request-id
+middleware, then registers all routers.
 """
 
 import threading
@@ -10,8 +11,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.logging import configure_logging
+from app.core.middleware import install_observability
+from app.core.settings import settings
 from app.database import init_db
 from app.routers import export, harmonize, health, mappings, ontology, quality
+
+configure_logging(settings.log_level)
 
 
 @asynccontextmanager
@@ -40,12 +46,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow the React dev server
+# Request-id + unified error envelope (spec §6.1).
+install_observability(app)
+
+# CORS — origins from settings (no wildcards in production).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-    ],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -36,3 +36,20 @@ class NotFoundError(AppError):
 class ValidationError(AppError):
     code = "VALIDATION_ERROR"
     status_code = 422
+
+
+def error_envelope(
+    code: str, message: str, *, details: dict | None = None, request_id: str = ""
+) -> dict:
+    """Build the unified error body (spec §6.1).
+
+    Shape: ``{"error": {code, message, details, request_id}}``.
+    """
+    return {
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details or {},
+            "request_id": request_id,
+        }
+    }
