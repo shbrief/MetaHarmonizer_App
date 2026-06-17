@@ -18,19 +18,19 @@ export default {
         mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       colors: {
-        // Brand — refined indigo/blue for a trustworthy clinical tool.
+        // Brand — aligned to cBioPortal's signature blue for a familiar feel.
         primary: {
-          50: '#eef4ff',
-          100: '#dae6ff',
-          200: '#bdd2ff',
-          300: '#90b4ff',
-          400: '#5d8bff',
-          500: '#3b66f5',
-          600: '#2547e8',
-          700: '#1d35d4',
-          800: '#1e2fab',
-          900: '#1e2d87',
-          950: '#161d52',
+          50: '#eef6fd',
+          100: '#d5e9fb',
+          200: '#b0d4f6',
+          300: '#7eb8ef',
+          400: '#4f9ae8',
+          500: '#2986e2',
+          600: '#1f6fc4',
+          700: '#1d5aa0',
+          800: '#1d4c84',
+          900: '#1c416d',
+          950: '#132a49',
         },
         // Accent — teal, used sparingly for highlights.
         accent: {
@@ -60,7 +60,7 @@ export default {
         'grid-slate':
           'linear-gradient(to right, rgb(15 23 42 / 0.035) 1px, transparent 1px), linear-gradient(to bottom, rgb(15 23 42 / 0.035) 1px, transparent 1px)',
         'mesh-primary':
-          'radial-gradient(at 20% 20%, rgb(59 102 245 / 0.14) 0px, transparent 50%), radial-gradient(at 80% 0%, rgb(23 173 132 / 0.10) 0px, transparent 50%), radial-gradient(at 80% 100%, rgb(99 102 241 / 0.10) 0px, transparent 50%)',
+          'radial-gradient(at 20% 20%, rgb(41 134 226 / 0.12) 0px, transparent 50%), radial-gradient(at 80% 0%, rgb(23 173 132 / 0.08) 0px, transparent 50%), radial-gradient(at 80% 100%, rgb(31 111 196 / 0.10) 0px, transparent 50%)',
       },
       backgroundSize: {
         grid: '28px 28px',

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -10,24 +11,36 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
+  Cell as PieCell,
 } from 'recharts';
-import { getQualityMetrics } from '../api/client';
+import { ArrowRight, Columns3, Gauge, ListChecks, Layers, Wrench } from 'lucide-react';
+import { getQualityMetrics, getStudyMappings } from '../api/client';
 import { useStudies } from '../hooks/queries';
 import PageHeader from '../components/ui/PageHeader';
 import { Card, CardBody } from '../components/ui/Card';
 import { LoadingBlock } from '../components/ui/Feedback';
+import AnimatedNumber from '../components/ui/AnimatedNumber';
+import ConfidenceBadge from '../components/ConfidenceBadge';
+import StageBadge from '../components/StageBadge';
 import StudyPicker, { StudySelect } from '../components/StudyPicker';
+import type { Mapping } from '../api/types';
 
 const STAGE_COLORS: Record<string, string> = {
-  stage1: '#3b66f5',
+  stage1: '#2986e2',
   stage2: '#6366f1',
   stage3: '#a855f7',
   stage4: '#17ad84',
   unmapped: '#94a3b8',
+  invalid: '#f43f5e',
 };
-
-const STATUS_COLORS = ['#22c55e', '#eab308', '#ef4444', '#94a3b8'];
+const STAGE_LABELS: Record<string, string> = {
+  stage1: 'Dict / Fuzzy',
+  stage2: 'Value / Ontology',
+  stage3: 'Semantic',
+  stage4: 'LLM',
+  unmapped: 'Unmapped',
+  invalid: 'Invalid',
+};
 
 export default function QualityDashboard() {
   const { studyId } = useParams<{ studyId: string }>();
@@ -39,6 +52,16 @@ export default function QualityDashboard() {
     queryFn: () => getQualityMetrics(studyId!),
     enabled: !!studyId,
   });
+  const { data: mappings } = useQuery({
+    queryKey: ['mappings', studyId],
+    queryFn: () => getStudyMappings(studyId!),
+    enabled: !!studyId,
+  });
+
+  // ── Derived, widget-specific aggregates (computed once) ──────────────────
+  const methodMix = useMemo(() => aggregateMethods(mappings ?? []), [mappings]);
+  const confByStage = useMemo(() => aggregateConfidenceByStage(mappings ?? []), [mappings]);
+  const needsReview = useMemo(() => pickNeedsReview(mappings ?? []), [mappings]);
 
   if (!studyId) {
     return (
@@ -56,22 +79,18 @@ export default function QualityDashboard() {
     return <LoadingBlock label="Crunching metrics…" />;
   }
 
-  const statusData = [
-    { name: 'Accepted', value: metrics.auto_accepted },
-    { name: 'Pending', value: metrics.pending_review },
-    { name: 'Rejected', value: metrics.rejected },
-    { name: 'New Field', value: metrics.new_field_suggestions },
-  ];
-
-  const pipelineCoverage =
-    metrics.total_columns > 0
-      ? ((metrics.mapped_columns / metrics.total_columns) * 100).toFixed(1)
-      : '0';
+  const coverage = metrics.total_columns ? metrics.mapped_columns / metrics.total_columns : 0;
+  const stagePie = metrics.stage_breakdown.map((s) => ({
+    name: STAGE_LABELS[s.stage] ?? s.stage,
+    value: s.count,
+    color: STAGE_COLORS[s.stage] ?? '#94a3b8',
+  }));
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Quality dashboard"
+        description="How this study mapped — coverage, confidence, methods, and what still needs review."
         actions={
           <StudySelect
             studies={studies}
@@ -81,92 +100,130 @@ export default function QualityDashboard() {
         }
       />
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-        <KpiCard label="Total Columns" value={metrics.total_columns} />
-        <KpiCard label="Mapped" value={metrics.mapped_columns} sub={`${pipelineCoverage}%`} color="text-emerald-600" />
-        <KpiCard label="Unmapped" value={metrics.unmapped_columns} color="text-rose-600" />
-        <KpiCard label="Avg Confidence" value={`${(metrics.avg_confidence * 100).toFixed(1)}%`} />
-        <KpiCard label="Pending Review" value={metrics.pending_review} color="text-amber-600" />
+      {/* KPI strip — each number is distinct */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Kpi icon={<Columns3 className="h-4 w-4" />} label="Columns" value={metrics.total_columns} hint={`${metrics.unmapped_columns} unmapped`} />
+        <Kpi icon={<Layers className="h-4 w-4" />} label="Coverage" value={coverage * 100} decimals={1} suffix="%" hint={`${metrics.mapped_columns} mapped`} tone="text-primary-600" />
+        <Kpi icon={<Gauge className="h-4 w-4" />} label="Avg confidence" value={metrics.avg_confidence * 100} decimals={1} suffix="%" tone="text-accent-600" />
+        <Kpi icon={<ListChecks className="h-4 w-4" />} label="Needs review" value={metrics.pending_review} hint={`${metrics.auto_accepted} accepted`} tone={metrics.pending_review ? 'text-amber-600' : 'text-emerald-600'} />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        {/* Confidence Distribution */}
-        <Card>
-          <CardBody>
-            <h3 className="mb-4 text-sm font-semibold text-slate-700">Confidence Score Distribution</h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={metrics.confidence_distribution}>
-                <XAxis dataKey="bucket" tick={{ fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#3b66f5" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardBody>
-        </Card>
+      {/* cBioPortal-style widget grid — every chart shows a different thing */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Widget title="Confidence distribution" subtitle="How many columns at each score band">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={metrics.confidence_distribution} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+              <XAxis dataKey="bucket" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+              <Tooltip cursor={{ fill: 'rgba(41,134,226,0.06)' }} />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                {metrics.confidence_distribution.map((b, i) => (
+                  <Cell key={i} fill={confColor(b.min_val)} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Widget>
 
-        {/* Stage Funnel */}
-        <Card>
-          <CardBody>
-            <h3 className="mb-4 text-sm font-semibold text-slate-700">Stage Breakdown</h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={metrics.stage_breakdown} layout="vertical">
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
-                <YAxis dataKey="stage" type="category" tick={{ fontSize: 12 }} width={80} />
-                <Tooltip
-                  formatter={(v: number, _: string, props: any) => [
-                    `${v} (${props.payload.percentage}%)`,
-                    'Columns',
-                  ]}
-                />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                  {metrics.stage_breakdown.map((entry) => (
-                    <Cell key={entry.stage} fill={STAGE_COLORS[entry.stage] ?? '#94a3b8'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </CardBody>
-        </Card>
-
-        {/* Status Pie */}
-        <Card>
-          <CardBody>
-            <h3 className="mb-4 text-sm font-semibold text-slate-700">Review Status</h3>
-            <ResponsiveContainer width="100%" height={250}>
+        <Widget title="Which stage solved it" subtitle="Pipeline stage that produced each match">
+          <div className="flex items-center gap-4">
+            <ResponsiveContainer width="55%" height={200}>
               <PieChart>
-                <Pie
-                  data={statusData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={90}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                >
-                  {statusData.map((_, i) => (
-                    <Cell key={i} fill={STATUS_COLORS[i]} />
+                <Pie data={stagePie} cx="50%" cy="50%" innerRadius={48} outerRadius={80} paddingAngle={2} dataKey="value">
+                  {stagePie.map((s, i) => (
+                    <PieCell key={i} fill={s.color} />
                   ))}
                 </Pie>
                 <Tooltip />
-                <Legend />
               </PieChart>
             </ResponsiveContainer>
-          </CardBody>
-        </Card>
+            <ul className="flex-1 space-y-1.5">
+              {stagePie.map((s) => (
+                <li key={s.name} className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 text-slate-600">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                    {s.name}
+                  </span>
+                  <span className="font-semibold text-slate-800">{s.value}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Widget>
 
-        {/* Progress */}
-        <Card>
-          <CardBody>
-            <h3 className="mb-4 text-sm font-semibold text-slate-700">Harmonization Progress</h3>
-            <div className="mt-6 space-y-4">
-              <ProgressBar label="Mapped" value={metrics.mapped_columns} max={metrics.total_columns} color="bg-emerald-500" />
-              <ProgressBar label="Reviewed" value={metrics.auto_accepted + metrics.rejected} max={metrics.total_columns} color="bg-primary-500" />
-              <ProgressBar label="Pending" value={metrics.pending_review} max={metrics.total_columns} color="bg-amber-500" />
+        <Widget title="Matching method" subtitle="Algorithm that won each column" icon={<Wrench className="h-4 w-4" />}>
+          {methodMix.length ? (
+            <BarList items={methodMix} />
+          ) : (
+            <Empty>No method data.</Empty>
+          )}
+        </Widget>
+
+        <Widget title="Confidence by stage" subtitle="Average score each stage achieves">
+          {confByStage.length ? (
+            <div className="space-y-3 pt-1">
+              {confByStage.map((c) => (
+                <div key={c.stage} className="flex items-center gap-3">
+                  <span className="w-24 shrink-0 truncate text-xs font-medium text-slate-600">
+                    {STAGE_LABELS[c.stage] ?? c.stage}
+                  </span>
+                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full" style={{ width: `${c.avg * 100}%`, backgroundColor: STAGE_COLORS[c.stage] ?? '#94a3b8' }} />
+                  </div>
+                  <span className="w-10 shrink-0 text-right text-xs font-semibold text-slate-700">
+                    {(c.avg * 100).toFixed(0)}%
+                  </span>
+                </div>
+              ))}
             </div>
+          ) : (
+            <Empty>No data.</Empty>
+          )}
+        </Widget>
+
+        {/* Needs-review queue spans the remaining width */}
+        <Card className="md:col-span-2 xl:col-span-1">
+          <CardBody>
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                  <ListChecks className="h-4 w-4 text-amber-500" />
+                  Needs your review
+                </h3>
+                <p className="text-xs text-slate-500">Lowest-confidence pending columns</p>
+              </div>
+              <button
+                onClick={() => navigate(`/review/${studyId}`)}
+                className="flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700"
+              >
+                Open review
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {needsReview.length ? (
+              <ul className="divide-y divide-slate-100">
+                {needsReview.map((m) => (
+                  <li key={m.id} className="flex items-center justify-between gap-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-xs font-medium text-slate-800">{m.raw_column}</p>
+                      <p className="truncate text-[11px] text-slate-400">
+                        → {m.curator_field || m.matched_field || 'unmapped'}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <StageBadge stage={m.stage} />
+                      <ConfidenceBadge score={m.confidence_score} size="sm" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="flex flex-col items-center gap-1 py-8 text-center">
+                <span className="text-2xl">🎉</span>
+                <p className="text-sm font-medium text-slate-700">All caught up</p>
+                <p className="text-xs text-slate-400">No columns are pending review.</p>
+              </div>
+            )}
           </CardBody>
         </Card>
       </div>
@@ -174,49 +231,129 @@ export default function QualityDashboard() {
   );
 }
 
-function KpiCard({
+/* ---------- aggregation helpers ---------- */
+
+function aggregateMethods(mappings: Mapping[]): { label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const m of mappings) {
+    const key = m.method?.trim() || 'unmatched';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+}
+
+function aggregateConfidenceByStage(mappings: Mapping[]): { stage: string; avg: number }[] {
+  const sums = new Map<string, { total: number; n: number }>();
+  for (const m of mappings) {
+    if (m.confidence_score == null) continue;
+    const stage = m.stage ?? 'unmapped';
+    const cur = sums.get(stage) ?? { total: 0, n: 0 };
+    cur.total += m.confidence_score;
+    cur.n += 1;
+    sums.set(stage, cur);
+  }
+  return [...sums.entries()]
+    .map(([stage, { total, n }]) => ({ stage, avg: n ? total / n : 0 }))
+    .sort((a, b) => a.stage.localeCompare(b.stage));
+}
+
+function pickNeedsReview(mappings: Mapping[]): Mapping[] {
+  return mappings
+    .filter((m) => m.status === 'pending')
+    .sort((a, b) => (a.confidence_score ?? 0) - (b.confidence_score ?? 0))
+    .slice(0, 7);
+}
+
+function confColor(minVal: number): string {
+  if (minVal >= 0.8) return '#10b981';
+  if (minVal >= 0.6) return '#84cc16';
+  if (minVal >= 0.4) return '#eab308';
+  if (minVal >= 0.2) return '#f97316';
+  return '#ef4444';
+}
+
+/* ---------- small presentational pieces ---------- */
+
+function Kpi({
+  icon,
   label,
   value,
-  sub,
-  color,
+  hint,
+  decimals = 0,
+  suffix = '',
+  tone,
 }: {
+  icon: React.ReactNode;
   label: string;
-  value: string | number;
-  sub?: string;
-  color?: string;
+  value: number;
+  hint?: string;
+  decimals?: number;
+  suffix?: string;
+  tone?: string;
 }) {
   return (
     <Card className="p-4">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className={`mt-1 text-2xl font-bold ${color ?? 'text-slate-900'}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
+      <div className="flex items-center gap-2 text-slate-400">
+        {icon}
+        <span className="text-xs font-medium text-slate-500">{label}</span>
+      </div>
+      <div className={`mt-1.5 text-2xl font-bold ${tone ?? 'text-slate-900'}`}>
+        <AnimatedNumber value={value} decimals={decimals} suffix={suffix} />
+      </div>
+      {hint && <div className="mt-0.5 text-xs text-slate-400">{hint}</div>}
     </Card>
   );
 }
 
-function ProgressBar({
-  label,
-  value,
-  max,
-  color,
+function Widget({
+  title,
+  subtitle,
+  icon,
+  children,
 }: {
-  label: string;
-  value: number;
-  max: number;
-  color: string;
+  title: string;
+  subtitle?: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
 }) {
-  const pct = max > 0 ? (value / max) * 100 : 0;
   return (
-    <div>
-      <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
-        <span>{label}</span>
-        <span>
-          {value}/{max} ({pct.toFixed(0)}%)
-        </span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
+    <Card>
+      <CardBody>
+        <div className="mb-3 flex items-center gap-2">
+          {icon && <span className="text-slate-400">{icon}</span>}
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+            {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
+          </div>
+        </div>
+        {children}
+      </CardBody>
+    </Card>
+  );
+}
+
+function BarList({ items }: { items: { label: string; count: number }[] }) {
+  const max = Math.max(...items.map((i) => i.count), 1);
+  return (
+    <div className="space-y-2.5 pt-1">
+      {items.map((it) => (
+        <div key={it.label} className="flex items-center gap-3">
+          <span className="w-28 shrink-0 truncate text-xs font-medium text-slate-600" title={it.label}>
+            {it.label}
+          </span>
+          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-primary-500" style={{ width: `${(it.count / max) * 100}%` }} />
+          </div>
+          <span className="w-8 shrink-0 text-right text-xs font-semibold text-slate-700">{it.count}</span>
+        </div>
+      ))}
     </div>
   );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="py-8 text-center text-sm text-slate-400">{children}</p>;
 }
