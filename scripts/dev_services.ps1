@@ -3,8 +3,7 @@
   Start/stop local dev services (PostgreSQL + Redis) WITHOUT Docker or admin rights.
 .DESCRIPTION
   Uses portable binaries under %LOCALAPPDATA%\mh-dev. This is the no-Docker dev path
-  for this machine (Docker Desktop needs WSL2 + admin + a corporate license — see
-  docs/adr/0002-system-architecture.md). On a machine WITH Docker, prefer `make up`.
+  for machines without WSL2/admin/Docker. On a machine WITH Docker, prefer `make up`.
 
     Postgres : 127.0.0.1:5433  user=mh  pw=mh_dev_password  db=metaharmonizer
     Redis    : 127.0.0.1:6380

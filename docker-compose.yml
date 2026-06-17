@@ -2,7 +2,6 @@
 # One command brings up Postgres + Redis + API + worker (+ Caddy reverse proxy).
 #   docker compose up        (or: make up)
 #
-# Architecture: docs/adr/0002-system-architecture.md
 # The same image runs the API and the worker; the `command` differs.
 
 name: metaharmonizer

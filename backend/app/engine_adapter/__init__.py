@@ -14,7 +14,7 @@ The concrete implementation is chosen by the ``ENGINE_IMPL`` env var:
     ENGINE_IMPL=mock           (fast deterministic fake; for tests)
 
 See ``backend/app/engine_adapter/README.md`` for the developer guide
-and ``docs/metaharmonizerapp-requirements.pdf`` for the full design.
+and the full design.
 """
 
 from __future__ import annotations

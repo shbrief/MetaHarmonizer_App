@@ -1,7 +1,7 @@
 # Backend project structure
 
 > The target layout for the FastAPI backend. Folders marked **(scaffold)** exist as empty
-> packages now and fill in during the sprint noted. Architecture rationale: [docs/adr/0002-system-architecture.md](../docs/adr/0002-system-architecture.md).
+> packages now and fill in during the sprint noted.
 
 ```
 backend/
@@ -49,8 +49,8 @@ routers  →  services  →  repositories  →  db
 
 **With Docker** (any machine that has it): `make up` → stack on `:8000` (API) / `:8080` (Caddy).
 
-**Without Docker** (this dev machine — no WSL2/admin, see [ADR 0002](../docs/adr/0002-system-architecture.md)):
-portable Postgres + Redis run from `%LOCALAPPDATA%\mh-dev` via the helper script — no admin needed.
+**Without Docker** (e.g. a machine without WSL2/admin): portable Postgres + Redis run from
+`%LOCALAPPDATA%\mh-dev` via the helper script — no admin needed.
 
 ```powershell
 ./scripts/dev_services.ps1 start     # start portable Postgres (5433) + Redis (6380)

@@ -10,8 +10,7 @@ Usage (manual):
     python scripts/check_engine_boundary.py path/to/file1.py path/to/file2.py
     python scripts/check_engine_boundary.py            # scans backend/app/
 
-See: docs/metaharmonizerapp-requirements.pdf
-     backend/app/engine_adapter/README.md
+See: backend/app/engine_adapter/README.md
 """
 from __future__ import annotations
 

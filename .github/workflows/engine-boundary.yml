@@ -1,7 +1,7 @@
 name: engine-boundary
 
 # Enforces the engine-adapter import boundary in CI.
-# See docs/engine-adapter-architecture.md §5.1
+# See backend/app/engine_adapter/README.md
 
 on:
   push:
