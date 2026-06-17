@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
 
+    # ── Job pipeline (Sprint 4) ─────────────────────────────────────────────
+    # inline: run harmonize in a thread off the request path (dev — just uvicorn).
+    # queue : enqueue to arq workers for horizontal scale (production).
+    job_mode: Literal["inline", "queue"] = "inline"
+    job_soft_timeout_sec: int = 300   # 5 min — graceful
+    job_hard_timeout_sec: int = 900   # 15 min — worker killed
+    job_max_attempts: int = 3
+    ws_ticket_ttl_sec: int = 30       # one-time WS auth nonce lifetime
+
     # ── Object storage ──────────────────────────────────────────────────────
     object_store_url: str = "file:///app/data/objects"
     r2_bucket: str | None = None

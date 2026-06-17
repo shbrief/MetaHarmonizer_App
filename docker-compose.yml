@@ -76,9 +76,9 @@ services:
     volumes:
       - ./backend:/app
       - engine_cache:/root/.metaharmonizer
-    # Worker entry point lands in Sprint 4 (app/workers). Until then this
-    # service is a no-op placeholder so the topology is in place.
-    command: ["python", "-c", "print('worker placeholder — arq worker arrives in Sprint 4'); import time; time.sleep(31536000)"]
+    # arq worker (Sprint 4). Set JOB_MODE=queue so the API enqueues here.
+    # Scale concurrency with `docker compose up --scale worker=N`.
+    command: ["arq", "app.workers.arq_worker.WorkerSettings"]
     depends_on:
       redis:
         condition: service_healthy

@@ -83,6 +83,28 @@ export interface HarmonizeResponse {
     message: string;
 }
 
+/** 202 response from the async harmonize endpoint. */
+export interface HarmonizeAccepted {
+    job_id: number;
+    study_id: string;
+    study_name: string;
+    status: string; // "queued"
+    row_count: number;
+    column_count: number;
+    message: string;
+}
+
+/** A live progress event pushed over the job WebSocket. */
+export interface JobProgress {
+    study_id: string;
+    type: 'progress' | 'complete' | 'failed' | 'cancelled';
+    stage: string;
+    state: string;
+    pct: number;
+    message: string;
+    result?: { columns: number; rows: number; ontology_values: number };
+}
+
 export interface HarmonizationResults {
     study: Study;
     mappings: Mapping[];

@@ -18,7 +18,7 @@ from app.core.metrics import MetricsMiddleware
 from app.core.sentry import init_sentry
 from app.core.settings import settings
 from app.database import init_db
-from app.routers import admin, audit, auth, export, harmonize, health, mappings, ontology, quality, tokens
+from app.routers import admin, audit, auth, export, harmonize, health, mappings, ontology, quality, tokens, ws
 
 configure_logging(settings.log_level)
 init_sentry()
@@ -73,6 +73,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(tokens.router)
+app.include_router(ws.router)
 app.include_router(audit.router)
 app.include_router(harmonize.router)
 app.include_router(mappings.router)

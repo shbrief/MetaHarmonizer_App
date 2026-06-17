@@ -6,7 +6,7 @@
 import { apiFetch, BASE } from './http';
 import type {
     HarmonizationResults,
-    HarmonizeResponse,
+    HarmonizeAccepted,
     Mapping,
     OntologyMapping,
     OntologySearchResult,
@@ -38,10 +38,10 @@ export async function getStudy(id: string): Promise<Study> {
 
 /* ---------- Harmonize ---------- */
 
-export async function uploadAndHarmonize(file: File): Promise<HarmonizeResponse> {
+export async function uploadAndHarmonize(file: File): Promise<HarmonizeAccepted> {
     const form = new FormData();
     form.append('file', file);
-    return request<HarmonizeResponse>(`${BASE}/harmonize`, {
+    return request<HarmonizeAccepted>(`${BASE}/harmonize`, {
         method: 'POST',
         body: form,
     });

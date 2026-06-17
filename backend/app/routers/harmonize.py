@@ -7,20 +7,22 @@ Handles file upload, triggers the harmonization pipeline, and returns results.
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database as db
 from app.core.deps import require_role
+from app.core.queue import enqueue_harmonize
 from app.core.settings import settings
 from app.core.uploads import check_upload_size
-from app.engine_adapter import EngineProtocol, get_engine
-from app.models import HarmonizeResponse, OverviewResponse, StudyOut
+from app.db.session import get_db
+from app.models import HarmonizeAccepted, OverviewResponse, StudyOut
+from app.repositories import jobs as jobs_repo
 from app.services.analytics import compute_overview
 from app.services.harmonizer import generate_study_id
 
@@ -34,13 +36,19 @@ CURATED_PATH = (
 )
 
 
-@router.post("/harmonize", response_model=HarmonizeResponse)
+@router.post("/harmonize", response_model=HarmonizeAccepted, status_code=202)
 async def harmonize_study(
     file: UploadFile = File(...),
-    engine: EngineProtocol = Depends(get_engine),
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
+    db_session: AsyncSession = Depends(get_db),
 ):
-    """Upload a clinical metadata file and run the full harmonization pipeline."""
+    """Upload a metadata file and enqueue harmonization.
+
+    Returns 202 immediately with a ``job_id``; the heavy pipeline runs off the
+    request path (thread/worker) so the API stays responsive under many
+    concurrent users. The client follows progress on
+    ``/api/v1/ws/jobs/{study_id}``.
+    """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
@@ -70,60 +78,53 @@ async def harmonize_study(
                 check_upload_size(written, settings.max_upload_mb)  # raises 413
             f.write(chunk)
 
-    # Read data
-    sep = "\t" if suffix in (".tsv", ".txt") else ","
-    try:
-        raw_df = pd.read_csv(save_path, sep=sep, low_memory=False)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}")
-
     if not CURATED_PATH.exists():
+        save_path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=500,
             detail="Curated reference file not found. Place curated_meta.csv in metadata_samples/.",
         )
 
-    curated_df = pd.read_csv(CURATED_PATH, low_memory=False)
+    # Quick shape read for the study record (cheap; the engine work is deferred).
+    sep = "\t" if suffix in (".tsv", ".txt") else ","
+    try:
+        shape_df = pd.read_csv(save_path, sep=sep, nrows=None, low_memory=False)
+    except Exception as exc:
+        save_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}")
 
-    # Create study record
     study_name = Path(file.filename).stem
     db.create_study(
         study_id=study_id,
         name=study_name,
         file_path=str(save_path),
-        row_count=len(raw_df),
-        column_count=len(raw_df.columns),
+        row_count=len(shape_df),
+        column_count=len(shape_df.columns),
     )
-    db.update_study_status(study_id, "processing")
+    db.update_study_status(study_id, "queued")
 
-    # Run schema mapping pipeline — engine is selected by ENGINE_IMPL env var
-    t0 = time.perf_counter()
-    schema_results = engine.harmonize_schema(raw_df, curated_df, csv_path=str(save_path))
-    t_schema = time.perf_counter() - t0
-    db.insert_mappings(study_id, schema_results)
+    # Record the job and enqueue it (inline thread in dev, arq workers in prod).
+    job = await jobs_repo.create_job(db_session, study_id=study_id, kind="harmonize")
+    await db_session.commit()
+    job_id = job.id
 
-    # Run ontology value mapping
-    t1 = time.perf_counter()
-    onto_results = engine.map_values(raw_df, schema_results)
-    if onto_results:
-        db.insert_ontology_mappings(study_id, onto_results)
-    t_onto = time.perf_counter() - t1
-
-    db.update_study_status(study_id, "review")
-
-    total = time.perf_counter() - t0
-    logger.info(
-        "Pipeline timing: schema=%.1fs  ontology=%.1fs  total=%.1fs",
-        t_schema, t_onto, total,
+    await enqueue_harmonize(
+        job_id=job_id,
+        study_id=study_id,
+        file_path=str(save_path),
+        suffix=suffix,
+        curated_path=str(CURATED_PATH),
+        owner_id=getattr(user, "id", None),
     )
 
-    return HarmonizeResponse(
-        job_id=study_id,
-        status="review",
+    return HarmonizeAccepted(
+        job_id=job_id,
+        study_id=study_id,
         study_name=study_name,
-        row_count=len(raw_df),
-        column_count=len(raw_df.columns),
-        message=f"Harmonization complete. {len(schema_results)} columns processed.",
+        status="queued",
+        row_count=len(shape_df),
+        column_count=len(shape_df.columns),
+        message="Harmonization started.",
     )
 
 
