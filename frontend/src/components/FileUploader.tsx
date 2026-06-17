@@ -37,8 +37,8 @@ export default function FileUploader({ onFileSelected, accept = '.csv,.tsv,.txt'
 
   return (
     <label
-      className={`flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-xl cursor-pointer transition-colors
-        ${dragActive ? 'border-primary-500 bg-primary-50' : 'border-gray-300 bg-white hover:bg-gray-50'}
+      className={`flex flex-col items-center justify-center w-full h-52 border-2 border-dashed rounded-2xl cursor-pointer transition
+        ${dragActive ? 'border-primary-500 bg-primary-50' : 'border-slate-300 bg-white hover:border-primary-300 hover:bg-slate-50'}
         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -47,16 +47,17 @@ export default function FileUploader({ onFileSelected, accept = '.csv,.tsv,.txt'
       onDragLeave={() => setDragActive(false)}
       onDrop={handleDrop}
     >
-      <Upload className="w-10 h-10 text-gray-400 mb-2" />
+      <span className={`grid h-14 w-14 place-items-center rounded-2xl transition ${dragActive ? 'bg-primary-100 text-primary-600' : 'bg-slate-100 text-slate-400'}`}>
+        <Upload className="h-7 w-7" />
+      </span>
       {fileName ? (
-        <p className="text-sm font-medium text-primary-700">{fileName}</p>
+        <p className="mt-3 text-sm font-semibold text-primary-700">{fileName}</p>
       ) : (
         <>
-          <p className="text-sm text-gray-500">
-            <span className="font-semibold text-primary-600">Click to upload</span> or drag
-            and drop
+          <p className="mt-3 text-sm text-slate-600">
+            <span className="font-semibold text-primary-600">Click to upload</span> or drag and drop
           </p>
-          <p className="text-xs text-gray-400 mt-1">CSV, TSV, or TXT</p>
+          <p className="mt-1 text-xs text-slate-400">CSV, TSV, or TXT · up to 50&nbsp;MB</p>
         </>
       )}
       <input

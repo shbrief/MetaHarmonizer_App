@@ -3,6 +3,7 @@
 /*  Centralised HTTP layer — every component calls these functions.   */
 /* ------------------------------------------------------------------ */
 
+import { apiFetch, BASE } from './http';
 import type {
     HarmonizationResults,
     HarmonizeResponse,
@@ -13,15 +14,11 @@ import type {
     Study,
 } from './types';
 
-const BASE = '/api/v1';
-
+/** Thin wrapper kept for backwards compatibility: routes legacy `${BASE}/x`
+ *  paths through the shared auth-aware fetch (bearer token + 401 refresh). */
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, init);
-    if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`API ${res.status}: ${body}`);
-    }
-    return res.json() as Promise<T>;
+    const path = url.startsWith(BASE) ? url.slice(BASE.length) : url;
+    return apiFetch<T>(path, init);
 }
 
 /* ---------- Studies ---------- */

@@ -13,18 +13,21 @@ import {
   XCircle,
   Clock,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 import StageBadge from '../components/StageBadge';
 import StatusBadge from '../components/StatusBadge';
+import PageHeader from '../components/ui/PageHeader';
+import StudyPicker, { StudySelect } from '../components/StudyPicker';
+import { useStudies } from '../hooks/queries';
 import {
-  listStudies,
   getStudyMappings,
   acceptMapping,
   rejectMapping,
   editMapping,
   batchUpdateMappings,
 } from '../api/client';
-import type { Mapping, Study } from '../api/types';
+import type { Mapping } from '../api/types';
 
 type SortKey = 'raw_column' | 'confidence_score' | 'stage' | 'status';
 type FilterStage = 'all' | 'stage1' | 'stage2' | 'stage3' | 'stage4' | 'invalid' | 'unmapped';
@@ -33,8 +36,8 @@ type FilterStatus = 'all' | 'pending' | 'accepted' | 'rejected';
 export default function MappingReview() {
   const { studyId } = useParams<{ studyId: string }>();
   const navigate = useNavigate();
+  const { data: studies, isLoading: studiesLoading } = useStudies();
 
-  const [studies, setStudies] = useState<Study[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(studyId ?? null);
@@ -52,18 +55,6 @@ export default function MappingReview() {
   const [editField, setEditField] = useState('');
   const [editNote, setEditNote] = useState('');
 
-  // Toast notification
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 2500);
-  };
-
-  // Load studies list
-  useEffect(() => {
-    listStudies().then(setStudies).catch(console.error);
-  }, []);
-
   // Load mappings when study selected
   useEffect(() => {
     if (!selectedId) return;
@@ -73,6 +64,9 @@ export default function MappingReview() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [selectedId]);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') =>
+    type === 'success' ? toast.success(message) : toast.error(message);
 
   // Study selector change
   const handleStudyChange = (id: string) => {
@@ -180,94 +174,39 @@ export default function MappingReview() {
   // No study selected
   if (!selectedId) {
     return (
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-900">Mapping Review</h2>
-        {studies.length === 0 ? (
-          <p className="text-gray-500">
-            No studies uploaded yet.{' '}
-            <button onClick={() => navigate('/')} className="text-primary-600 underline">
-              Upload a file
-            </button>{' '}
-            to get started.
-          </p>
-        ) : (
-          <div className="grid gap-3">
-            {studies.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => handleStudyChange(s.id)}
-                className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-primary-300 hover:shadow-sm transition-all"
-              >
-                <div className="font-medium text-gray-900">{s.name}</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {s.row_count} rows · {s.column_count} columns · {s.status}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <StudyPicker
+        title="Mapping review"
+        description="Pick a study to review and curate column mappings."
+        studies={studies}
+        loading={studiesLoading}
+        basePath="/review"
+      />
     );
   }
 
   return (
     <div className="space-y-4">
-      {/* Toast notification */}
-      {toast && (
-        <div
-          className={`fixed top-4 right-4 z-[100] flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all ${
-            toast.type === 'success'
-              ? 'bg-green-600 text-white'
-              : 'bg-red-600 text-white'
-          }`}
-        >
-          {toast.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4" />
-          ) : (
-            <XCircle className="w-4 h-4" />
-          )}
-          {toast.message}
-        </div>
-      )}
-
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Schema Mapping Review</h2>
-          <div className="flex items-center gap-2 mt-1">
-            <select
-              value={selectedId}
-              onChange={(e) => handleStudyChange(e.target.value)}
-              className="text-sm border border-gray-300 rounded-lg px-2 py-1"
-            >
-              {studies.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Batch actions */}
-        {selected.size > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">{selected.size} selected</span>
-            <button
-              onClick={() => handleBatch('accepted')}
-              className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
-            >
-              Accept All
-            </button>
-            <button
-              onClick={() => handleBatch('rejected')}
-              className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-700"
-            >
-              Reject All
-            </button>
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Schema mapping review"
+        actions={
+          selected.size > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-slate-600">{selected.size} selected</span>
+              <button onClick={() => handleBatch('accepted')} className="btn bg-emerald-600 text-white btn-sm hover:bg-emerald-700">
+                <Check className="h-3.5 w-3.5" />
+                Accept all
+              </button>
+              <button onClick={() => handleBatch('rejected')} className="btn-danger btn-sm">
+                <X className="h-3.5 w-3.5" />
+                Reject all
+              </button>
+            </div>
+          ) : (
+            <StudySelect studies={studies} value={selectedId} onChange={handleStudyChange} />
+          )
+        }
+      />
 
       {/* Status Summary Tabs */}
       <div className="flex gap-2">

@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import {
   BarChart,
   Bar,
@@ -13,78 +12,48 @@ import {
   Cell,
   Legend,
 } from 'recharts';
-import { listStudies, getQualityMetrics } from '../api/client';
-import type { QualityMetrics, Study } from '../api/types';
+import { getQualityMetrics } from '../api/client';
+import { useStudies } from '../hooks/queries';
+import PageHeader from '../components/ui/PageHeader';
+import { Card, CardBody } from '../components/ui/Card';
+import { LoadingBlock } from '../components/ui/Feedback';
+import StudyPicker, { StudySelect } from '../components/StudyPicker';
 
 const STAGE_COLORS: Record<string, string> = {
-  stage1: '#3b82f6',
+  stage1: '#3b66f5',
   stage2: '#6366f1',
   stage3: '#a855f7',
-  stage4: '#f97316',
-  unmapped: '#9ca3af',
+  stage4: '#17ad84',
+  unmapped: '#94a3b8',
 };
 
-const STATUS_COLORS = ['#22c55e', '#eab308', '#ef4444', '#9ca3af'];
+const STATUS_COLORS = ['#22c55e', '#eab308', '#ef4444', '#94a3b8'];
 
 export default function QualityDashboard() {
   const { studyId } = useParams<{ studyId: string }>();
   const navigate = useNavigate();
+  const { data: studies, isLoading: studiesLoading } = useStudies();
 
-  const [studies, setStudies] = useState<Study[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(studyId ?? null);
-  const [metrics, setMetrics] = useState<QualityMetrics | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { data: metrics, isLoading } = useQuery({
+    queryKey: ['quality', studyId],
+    queryFn: () => getQualityMetrics(studyId!),
+    enabled: !!studyId,
+  });
 
-  useEffect(() => {
-    listStudies().then(setStudies).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    setLoading(true);
-    getQualityMetrics(selectedId)
-      .then(setMetrics)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [selectedId]);
-
-  const handleStudyChange = (id: string) => {
-    setSelectedId(id);
-    navigate(`/quality/${id}`, { replace: true });
-  };
-
-  if (!selectedId) {
+  if (!studyId) {
     return (
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-900">Quality Dashboard</h2>
-        {studies.length === 0 ? (
-          <p className="text-gray-500">No studies uploaded yet.</p>
-        ) : (
-          <div className="grid gap-3">
-            {studies.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => handleStudyChange(s.id)}
-                className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-primary-300 hover:shadow-sm transition-all"
-              >
-                <div className="font-medium text-gray-900">{s.name}</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {s.row_count} rows · {s.column_count} columns
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <StudyPicker
+        title="Quality dashboard"
+        description="Pick a study to view harmonization quality metrics."
+        studies={studies}
+        loading={studiesLoading}
+        basePath="/quality"
+      />
     );
   }
 
-  if (loading || !metrics) {
-    return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
-      </div>
-    );
+  if (isLoading || !metrics) {
+    return <LoadingBlock label="Crunching metrics…" />;
   }
 
   const statusData = [
@@ -101,131 +70,105 @@ export default function QualityDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Quality Dashboard</h2>
-          <select
-            value={selectedId}
-            onChange={(e) => handleStudyChange(e.target.value)}
-            className="text-sm border border-gray-300 rounded-lg px-2 py-1 mt-1"
-          >
-            {studies.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+      <PageHeader
+        title="Quality dashboard"
+        actions={
+          <StudySelect
+            studies={studies}
+            value={studyId}
+            onChange={(id) => navigate(`/quality/${id}`, { replace: true })}
+          />
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <KpiCard label="Total Columns" value={metrics.total_columns} />
-        <KpiCard label="Mapped" value={metrics.mapped_columns} sub={`${pipelineCoverage}%`} color="text-green-700" />
-        <KpiCard label="Unmapped" value={metrics.unmapped_columns} color="text-red-600" />
+        <KpiCard label="Mapped" value={metrics.mapped_columns} sub={`${pipelineCoverage}%`} color="text-emerald-600" />
+        <KpiCard label="Unmapped" value={metrics.unmapped_columns} color="text-rose-600" />
         <KpiCard label="Avg Confidence" value={`${(metrics.avg_confidence * 100).toFixed(1)}%`} />
-        <KpiCard label="Pending Review" value={metrics.pending_review} color="text-yellow-700" />
+        <KpiCard label="Pending Review" value={metrics.pending_review} color="text-amber-600" />
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {/* Confidence Distribution */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">
-            Confidence Score Distribution
-          </h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={metrics.confidence_distribution}>
-              <XAxis dataKey="bucket" tick={{ fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <Card>
+          <CardBody>
+            <h3 className="mb-4 text-sm font-semibold text-slate-700">Confidence Score Distribution</h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={metrics.confidence_distribution}>
+                <XAxis dataKey="bucket" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Bar dataKey="count" fill="#3b66f5" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardBody>
+        </Card>
 
         {/* Stage Funnel */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">
-            Stage Breakdown
-          </h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart
-              data={metrics.stage_breakdown}
-              layout="vertical"
-            >
-              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
-              <YAxis dataKey="stage" type="category" tick={{ fontSize: 12 }} width={80} />
-              <Tooltip
-                formatter={(v: number, _: string, props: any) => [
-                  `${v} (${props.payload.percentage}%)`,
-                  'Columns',
-                ]}
-              />
-              <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                {metrics.stage_breakdown.map((entry) => (
-                  <Cell
-                    key={entry.stage}
-                    fill={STAGE_COLORS[entry.stage] ?? '#9ca3af'}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <Card>
+          <CardBody>
+            <h3 className="mb-4 text-sm font-semibold text-slate-700">Stage Breakdown</h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={metrics.stage_breakdown} layout="vertical">
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                <YAxis dataKey="stage" type="category" tick={{ fontSize: 12 }} width={80} />
+                <Tooltip
+                  formatter={(v: number, _: string, props: any) => [
+                    `${v} (${props.payload.percentage}%)`,
+                    'Columns',
+                  ]}
+                />
+                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                  {metrics.stage_breakdown.map((entry) => (
+                    <Cell key={entry.stage} fill={STAGE_COLORS[entry.stage] ?? '#94a3b8'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardBody>
+        </Card>
 
         {/* Status Pie */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">
-            Review Status
-          </h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie
-                data={statusData}
-                cx="50%"
-                cy="50%"
-                innerRadius={50}
-                outerRadius={90}
-                paddingAngle={3}
-                dataKey="value"
-                label={({ name, value }) => `${name}: ${value}`}
-              >
-                {statusData.map((_, i) => (
-                  <Cell key={i} fill={STATUS_COLORS[i]} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+        <Card>
+          <CardBody>
+            <h3 className="mb-4 text-sm font-semibold text-slate-700">Review Status</h3>
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={statusData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={90}
+                  paddingAngle={3}
+                  dataKey="value"
+                  label={({ name, value }) => `${name}: ${value}`}
+                >
+                  {statusData.map((_, i) => (
+                    <Cell key={i} fill={STATUS_COLORS[i]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardBody>
+        </Card>
 
         {/* Progress */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">
-            Harmonization Progress
-          </h3>
-          <div className="space-y-4 mt-6">
-            <ProgressBar
-              label="Mapped"
-              value={metrics.mapped_columns}
-              max={metrics.total_columns}
-              color="bg-green-500"
-            />
-            <ProgressBar
-              label="Reviewed"
-              value={metrics.auto_accepted + metrics.rejected}
-              max={metrics.total_columns}
-              color="bg-blue-500"
-            />
-            <ProgressBar
-              label="Pending"
-              value={metrics.pending_review}
-              max={metrics.total_columns}
-              color="bg-yellow-500"
-            />
-          </div>
-        </div>
+        <Card>
+          <CardBody>
+            <h3 className="mb-4 text-sm font-semibold text-slate-700">Harmonization Progress</h3>
+            <div className="mt-6 space-y-4">
+              <ProgressBar label="Mapped" value={metrics.mapped_columns} max={metrics.total_columns} color="bg-emerald-500" />
+              <ProgressBar label="Reviewed" value={metrics.auto_accepted + metrics.rejected} max={metrics.total_columns} color="bg-primary-500" />
+              <ProgressBar label="Pending" value={metrics.pending_review} max={metrics.total_columns} color="bg-amber-500" />
+            </div>
+          </CardBody>
+        </Card>
       </div>
     </div>
   );
@@ -243,13 +186,11 @@ function KpiCard({
   color?: string;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className={`text-2xl font-bold mt-1 ${color ?? 'text-gray-900'}`}>
-        {value}
-      </div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
-    </div>
+    <Card className="p-4">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={`mt-1 text-2xl font-bold ${color ?? 'text-slate-900'}`}>{value}</div>
+      {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
+    </Card>
   );
 }
 
@@ -267,17 +208,14 @@ function ProgressBar({
   const pct = max > 0 ? (value / max) * 100 : 0;
   return (
     <div>
-      <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+      <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
         <span>{label}</span>
         <span>
           {value}/{max} ({pct.toFixed(0)}%)
         </span>
       </div>
-      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full ${color}`}
-          style={{ width: `${pct}%` }}
-        />
+      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );

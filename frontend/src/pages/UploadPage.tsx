@@ -1,14 +1,28 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { CheckCircle2, AlertCircle, FileSpreadsheet, ArrowRight, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 import FileUploader from '../components/FileUploader';
+import PageHeader from '../components/ui/PageHeader';
+import { Card, CardBody } from '../components/ui/Card';
+import Button from '../components/ui/Button';
 import { uploadAndHarmonize } from '../api/client';
+import { ApiError } from '../api/http';
 import type { HarmonizeResponse } from '../api/types';
 
 type UploadState = 'idle' | 'uploading' | 'success' | 'error';
 
+const STAGES = [
+  { stage: 'Stage 1', title: 'Dict / Fuzzy', desc: 'Dictionary lookup + RapidFuzz string matching against curated fields', tone: 'bg-primary-50 text-primary-700' },
+  { stage: 'Stage 2', title: 'Value / Ontology', desc: 'Column value overlap analysis using ontology-aware matching', tone: 'bg-indigo-50 text-indigo-700' },
+  { stage: 'Stage 3', title: 'Semantic', desc: 'Sentence-transformer embeddings (all-MiniLM-L6-v2) cosine similarity', tone: 'bg-purple-50 text-purple-700' },
+  { stage: 'Stage 4', title: 'LLM', desc: 'Large-language-model fallback for columns unmatched by earlier stages', tone: 'bg-accent-100 text-accent-700' },
+];
+
 export default function UploadPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [state, setState] = useState<UploadState>('idle');
   const [result, setResult] = useState<HarmonizeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,151 +42,121 @@ export default function UploadPage() {
       const res = await uploadAndHarmonize(file);
       setResult(res);
       setState('success');
-    } catch (err: any) {
-      setError(err.message || 'Upload failed');
+      qc.invalidateQueries({ queryKey: ['studies'] });
+      toast.success('Harmonization complete');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'Upload failed';
+      setError(msg);
       setState('error');
+      toast.error(msg);
     }
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      {/* Heading */}
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Upload Study Metadata</h2>
-        <p className="text-sm text-gray-500 mt-1">
-          Upload a CSV/TSV file with clinical metadata. The harmonization pipeline will
-          automatically map columns to the curated reference schema.
-        </p>
-      </div>
-
-      {/* Upload Zone */}
-      <FileUploader
-        onFileSelected={handleFileSelected}
-        disabled={state === 'uploading'}
+    <div className="mx-auto max-w-3xl space-y-7">
+      <PageHeader
+        title="Upload study metadata"
+        description="Upload a CSV/TSV file with clinical metadata. The pipeline maps columns to the curated reference schema automatically."
       />
 
-      {/* File Info */}
+      <FileUploader onFileSelected={handleFileSelected} disabled={state === 'uploading'} />
+
+      {/* Selected file → run */}
       {file && state !== 'success' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-gray-900">{file.name}</p>
-            <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
-          </div>
-          <button
-            onClick={handleUpload}
-            disabled={state === 'uploading'}
-            className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors disabled:opacity-50"
-          >
-            {state === 'uploading' ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Harmonizing…
-              </>
-            ) : (
-              'Run Harmonization'
-            )}
-          </button>
-        </div>
+        <Card>
+          <CardBody className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-50 text-primary-600">
+                <FileSpreadsheet className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-900">{file.name}</p>
+                <p className="text-xs text-slate-500">{(file.size / 1024).toFixed(1)} KB</p>
+              </div>
+            </div>
+            <Button
+              onClick={handleUpload}
+              loading={state === 'uploading'}
+              icon={state === 'uploading' ? undefined : <Sparkles className="h-4 w-4" />}
+            >
+              {state === 'uploading' ? 'Harmonizing…' : 'Run harmonization'}
+            </Button>
+          </CardBody>
+        </Card>
       )}
 
       {/* Success */}
       {state === 'success' && result && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-6 space-y-4">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="w-6 h-6 text-green-600 mt-0.5" />
-            <div>
-              <h3 className="text-lg font-semibold text-green-900">
-                Harmonization Complete
-              </h3>
-              <p className="text-sm text-green-700 mt-1">{result.message}</p>
+        <Card className="border-emerald-200 bg-emerald-50/40">
+          <CardBody className="space-y-5">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-6 w-6 text-emerald-600" />
+              <div>
+                <h3 className="text-lg font-semibold text-emerald-900">Harmonization complete</h3>
+                <p className="mt-0.5 text-sm text-emerald-700">{result.message}</p>
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-3 gap-4 mt-4">
-            <Stat label="Study" value={result.study_name} />
-            <Stat label="Rows" value={result.row_count.toLocaleString()} />
-            <Stat label="Columns" value={result.column_count.toLocaleString()} />
-          </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Stat label="Study" value={result.study_name} />
+              <Stat label="Rows" value={result.row_count.toLocaleString()} />
+              <Stat label="Columns" value={result.column_count.toLocaleString()} />
+            </div>
 
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={() => navigate(`/review/${result.job_id}`)}
-              className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
-            >
-              Review Mappings →
-            </button>
-            <button
-              onClick={() => navigate(`/quality/${result.job_id}`)}
-              className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              View Quality Dashboard
-            </button>
-          </div>
-        </div>
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => navigate(`/review/${result.job_id}`)} icon={<ArrowRight className="h-4 w-4" />}>
+                Review mappings
+              </Button>
+              <Button variant="secondary" onClick={() => navigate(`/quality/${result.job_id}`)}>
+                View quality dashboard
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
       )}
 
       {/* Error */}
       {state === 'error' && error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
-          <div>
-            <h3 className="text-sm font-semibold text-red-900">Upload Failed</h3>
-            <p className="text-sm text-red-700 mt-1">{error}</p>
-          </div>
-        </div>
+        <Card className="border-rose-200 bg-rose-50/50">
+          <CardBody className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 text-rose-600" />
+            <div>
+              <h3 className="text-sm font-semibold text-rose-900">Upload failed</h3>
+              <p className="mt-0.5 text-sm text-rose-700">{error}</p>
+            </div>
+          </CardBody>
+        </Card>
       )}
 
-      {/* How it works */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">
-          How the Pipeline Works
-        </h3>
-        <p className="text-xs text-gray-500 mb-4">
-          Powered by the real <span className="font-semibold">MetaHarmonizer SchemaMapEngine</span> — a 4-stage cascade from{' '}
-          <a href="https://github.com/shbrief/MetaHarmonizer" className="text-primary-600 underline" target="_blank" rel="noreferrer">shbrief/MetaHarmonizer</a>.
-        </p>
-        <div className="grid grid-cols-4 gap-4">
-          {[
-            {
-              stage: 'Stage 1',
-              title: 'Dict / Fuzzy',
-              desc: 'Dictionary lookup + RapidFuzz string matching against curated fields',
-            },
-            {
-              stage: 'Stage 2',
-              title: 'Value / Ontology',
-              desc: 'Column value overlap analysis using ontology-aware matching',
-            },
-            {
-              stage: 'Stage 3',
-              title: 'Semantic',
-              desc: 'Sentence-transformer embeddings (all-MiniLM-L6-v2) cosine similarity',
-            },
-            {
-              stage: 'Stage 4',
-              title: 'LLM',
-              desc: 'Large language model fallback for columns unmatched by earlier stages',
-            },
-          ].map((s) => (
-            <div key={s.stage} className="text-center">
-              <div className="text-xs font-semibold text-primary-600 mb-1">
-                {s.stage}
+      {/* Pipeline explainer */}
+      <Card>
+        <CardBody>
+          <h3 className="text-sm font-semibold text-slate-900">How the pipeline works</h3>
+          <p className="mb-5 mt-1 text-xs text-slate-500">
+            Powered by the MetaHarmonizer SchemaMapEngine — a 4-stage cascade.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {STAGES.map((s) => (
+              <div key={s.stage} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                <span className={`chip ${s.tone}`}>{s.stage}</span>
+                <p className="mt-2 text-sm font-semibold text-slate-900">{s.title}</p>
+                <p className="mt-1 text-xs text-slate-500">{s.desc}</p>
               </div>
-              <div className="text-sm font-medium text-gray-900">{s.title}</div>
-              <div className="text-xs text-gray-500 mt-1">{s.desc}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
     </div>
   );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-white rounded-lg border border-green-200 p-3 text-center">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-lg font-bold text-gray-900 mt-0.5">{value}</div>
+    <div className="rounded-xl border border-emerald-200 bg-white p-3 text-center">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-0.5 truncate text-lg font-bold text-slate-900" title={value}>
+        {value}
+      </div>
     </div>
   );
 }

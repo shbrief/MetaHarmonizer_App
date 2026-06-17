@@ -1,0 +1,275 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  KeyRound,
+  Laptop,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Copy,
+  Check,
+  LogOut,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import PageHeader from '../components/ui/PageHeader';
+import { Card, CardHeader, CardBody } from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import { LoadingBlock, EmptyState } from '../components/ui/Feedback';
+import { useAuth } from '../context/AuthContext';
+import {
+  createApiToken,
+  listApiTokens,
+  listSessions,
+  revokeApiToken,
+  revokeSession,
+} from '../api/auth';
+import type { ApiTokenCreated } from '../api/types';
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return '—';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+export default function ProfilePage() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+
+  const sessions = useQuery({ queryKey: ['sessions'], queryFn: listSessions });
+  const tokens = useQuery({ queryKey: ['tokens'], queryFn: listApiTokens });
+
+  const [newToken, setNewToken] = useState<ApiTokenCreated | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [scope, setScope] = useState<'read' | 'write'>('read');
+
+  const revokeSessionM = useMutation({
+    mutationFn: revokeSession,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+      toast.success('Session revoked');
+    },
+    onError: () => toast.error('Could not revoke session'),
+  });
+
+  const createTokenM = useMutation({
+    mutationFn: () => createApiToken(scope),
+    onSuccess: (t) => {
+      setNewToken(t);
+      setCopied(false);
+      qc.invalidateQueries({ queryKey: ['tokens'] });
+      toast.success('API token created');
+    },
+    onError: () => toast.error('Could not create token'),
+  });
+
+  const revokeTokenM = useMutation({
+    mutationFn: revokeApiToken,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tokens'] });
+      toast.success('Token revoked');
+    },
+    onError: () => toast.error('Could not revoke token'),
+  });
+
+  const copyToken = async () => {
+    if (!newToken) return;
+    await navigator.clipboard.writeText(newToken.token);
+    setCopied(true);
+    toast.success('Copied to clipboard');
+  };
+
+  if (!user) return null;
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-6">
+      <PageHeader
+        title="Profile & security"
+        description="Manage your account, active sessions, and API tokens."
+      />
+
+      {/* Account summary */}
+      <Card>
+        <CardBody className="flex flex-wrap items-center gap-4">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-primary-600 text-lg font-bold text-white">
+            {(user.name || user.email).slice(0, 2).toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-lg font-semibold text-slate-900">{user.name || 'Account'}</p>
+            <p className="truncate text-sm text-slate-500">{user.email}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge tone={user.role === 'admin' ? 'primary' : user.role === 'curator' ? 'teal' : 'slate'}>
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {user.role}
+            </Badge>
+            {user.email_verified ? (
+              <Badge tone="green">Verified</Badge>
+            ) : (
+              <Badge tone="amber">Unverified</Badge>
+            )}
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Sessions */}
+      <Card>
+        <CardHeader
+          icon={<Laptop className="h-4 w-4" />}
+          title="Active sessions"
+          description="Devices currently signed in to your account."
+        />
+        <CardBody className="space-y-2">
+          {sessions.isLoading ? (
+            <LoadingBlock label="Loading sessions…" />
+          ) : !sessions.data?.length ? (
+            <EmptyState title="No active sessions" />
+          ) : (
+            sessions.data.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-medium text-slate-800">
+                      {s.user_agent ? shortenUA(s.user_agent) : 'Unknown device'}
+                    </p>
+                    {s.current && <Badge tone="green">This device</Badge>}
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {s.ip || 'unknown IP'} · last active {timeAgo(s.last_seen ?? s.created_at)}
+                  </p>
+                </div>
+                {!s.current && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-rose-600 hover:bg-rose-50"
+                    icon={<LogOut className="h-3.5 w-3.5" />}
+                    loading={revokeSessionM.isPending && revokeSessionM.variables === s.id}
+                    onClick={() => revokeSessionM.mutate(s.id)}
+                  >
+                    Revoke
+                  </Button>
+                )}
+              </div>
+            ))
+          )}
+        </CardBody>
+      </Card>
+
+      {/* API tokens */}
+      <Card id="tokens">
+        <CardHeader
+          icon={<KeyRound className="h-4 w-4" />}
+          title="API tokens"
+          description="Personal tokens for CLI and programmatic access."
+          action={
+            <div className="flex items-center gap-2">
+              <select
+                value={scope}
+                onChange={(e) => setScope(e.target.value as 'read' | 'write')}
+                className="field !w-auto !py-1.5 text-xs"
+              >
+                <option value="read">read</option>
+                <option value="write">write</option>
+              </select>
+              <Button
+                size="sm"
+                icon={<Plus className="h-3.5 w-3.5" />}
+                loading={createTokenM.isPending}
+                onClick={() => createTokenM.mutate()}
+              >
+                New token
+              </Button>
+            </div>
+          }
+        />
+        <CardBody className="space-y-3">
+          {/* Freshly created token (shown once) */}
+          {newToken && (
+            <div className="rounded-xl border border-accent-200 bg-accent-50 p-4">
+              <p className="text-xs font-semibold text-accent-800">
+                Copy your token now — it won't be shown again.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="flex-1 truncate rounded-lg bg-white px-3 py-2 font-mono text-xs text-slate-700 ring-1 ring-slate-200">
+                  {newToken.token}
+                </code>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  onClick={copyToken}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {tokens.isLoading ? (
+            <LoadingBlock label="Loading tokens…" />
+          ) : !tokens.data?.length ? (
+            <EmptyState
+              icon={<KeyRound className="h-6 w-6" />}
+              title="No API tokens yet"
+              description="Create a token to use the API from scripts or the CLI."
+            />
+          ) : (
+            tokens.data.map((t) => (
+              <div
+                key={t.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-white text-slate-400 shadow-soft">
+                    <KeyRound className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">Token #{t.id}</p>
+                    <p className="text-xs text-slate-500">
+                      Created {new Date(t.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <Badge tone={t.scope === 'write' ? 'indigo' : 'slate'}>{t.scope}</Badge>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-rose-600 hover:bg-rose-50"
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                  loading={revokeTokenM.isPending && revokeTokenM.variables === t.id}
+                  onClick={() => revokeTokenM.mutate(t.id)}
+                >
+                  Revoke
+                </Button>
+              </div>
+            ))
+          )}
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+function shortenUA(ua: string): string {
+  const browser =
+    /Edg/.test(ua) ? 'Edge' :
+    /Chrome/.test(ua) ? 'Chrome' :
+    /Firefox/.test(ua) ? 'Firefox' :
+    /Safari/.test(ua) ? 'Safari' : 'Browser';
+  const os =
+    /Windows/.test(ua) ? 'Windows' :
+    /Mac/.test(ua) ? 'macOS' :
+    /Linux/.test(ua) ? 'Linux' :
+    /Android/.test(ua) ? 'Android' :
+    /iPhone|iPad/.test(ua) ? 'iOS' : '';
+  return os ? `${browser} on ${os}` : browser;
+}

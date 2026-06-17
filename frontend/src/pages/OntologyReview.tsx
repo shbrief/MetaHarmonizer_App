@@ -5,21 +5,23 @@ import {
   acceptOntologyMapping,
   editOntologyMapping,
   getOntologyMappings,
-  listStudies,
   rejectOntologyMapping,
   searchOntology,
 } from '../api/client';
+import { useStudies } from '../hooks/queries';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 import StatusBadge from '../components/StatusBadge';
-import type { OntologyMapping, OntologySearchResult, Study } from '../api/types';
+import PageHeader from '../components/ui/PageHeader';
+import StudyPicker, { StudySelect } from '../components/StudyPicker';
+import type { OntologyMapping, OntologySearchResult } from '../api/types';
 
 interface EditState { id: number; term: string; ontId: string }
 
 export default function OntologyReview() {
   const { studyId } = useParams<{ studyId: string }>();
   const navigate = useNavigate();
+  const { data: studies, isLoading: studiesLoading } = useStudies();
 
-  const [studies, setStudies] = useState<Study[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(studyId ?? null);
   const [ontoMappings, setOntoMappings] = useState<OntologyMapping[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,10 +32,6 @@ export default function OntologyReview() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<OntologySearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    listStudies().then(setStudies).catch(console.error);
-  }, []);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -94,27 +92,13 @@ export default function OntologyReview() {
 
   if (!selectedId) {
     return (
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-900">Ontology Review</h2>
-        {studies.length === 0 ? (
-          <p className="text-gray-500">No studies uploaded yet.</p>
-        ) : (
-          <div className="grid gap-3">
-            {studies.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => handleStudyChange(s.id)}
-                className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-primary-300 hover:shadow-sm transition-all"
-              >
-                <div className="font-medium text-gray-900">{s.name}</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {s.row_count} rows · {s.column_count} columns
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <StudyPicker
+        title="Ontology review"
+        description="Pick a study to review and curate ontology value mappings."
+        studies={studies}
+        loading={studiesLoading}
+        basePath="/ontology"
+      />
     );
   }
 
@@ -167,20 +151,16 @@ export default function OntologyReview() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Ontology Mapping Review</h2>
-          <select
+      <PageHeader
+        title="Ontology mapping review"
+        actions={
+          <StudySelect
+            studies={studies}
             value={selectedId}
-            onChange={(e) => handleStudyChange(e.target.value)}
-            className="text-sm border border-gray-300 rounded-lg px-2 py-1 mt-1"
-          >
-            {studies.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+            onChange={handleStudyChange}
+          />
+        }
+      />
 
       <div className="grid grid-cols-3 gap-6">
         {/* Main table */}
@@ -190,7 +170,7 @@ export default function OntologyReview() {
               <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
             </div>
           ) : Object.keys(grouped).length === 0 ? (
-            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-400">
+            <div className="card p-8 text-center text-slate-400">
               No ontology mappings found for this study.
             </div>
           ) : (

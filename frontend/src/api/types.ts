@@ -95,3 +95,54 @@ export interface OntologySearchResult {
     ontology: string;
     score: number;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Auth                                                              */
+/* ------------------------------------------------------------------ */
+
+export type Role = 'viewer' | 'curator' | 'admin';
+
+export interface User {
+    id: number;
+    email: string;
+    name: string | null;
+    role: Role;
+    is_active: boolean;
+    email_verified: boolean;
+}
+
+export interface TokenResponse {
+    access_token: string;
+    token_type: string;
+    user: User;
+}
+
+export interface SessionInfo {
+    id: number;
+    ip: string | null;
+    user_agent: string | null;
+    created_at: string;
+    last_seen: string | null;
+    current: boolean;
+}
+
+export interface ApiTokenInfo {
+    id: number;
+    scope: 'read' | 'write';
+    created_at: string;
+    revoked_at: string | null;
+}
+
+export interface ApiTokenCreated extends ApiTokenInfo {
+    token: string;
+}
+
+/** Shape of the backend's unified error envelope (spec §6.1). */
+export interface ApiErrorBody {
+    error: {
+        code: string;
+        message: string;
+        details?: Record<string, unknown>;
+        request_id?: string;
+    };
+}
