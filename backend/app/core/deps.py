@@ -14,14 +14,18 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.core.security import decode_token
+from app.core.security import decode_token, hash_api_token
 from app.core.settings import settings
 from app.db.models import User
 from app.db.session import get_db
+from app.repositories import api_tokens as api_tokens_repo
 from app.repositories import users as users_repo
 
 # Role hierarchy: higher number = more privilege.
 ROLE_RANK = {"viewer": 1, "curator": 2, "admin": 3}
+
+# API-token prefix (see app.core.security.generate_api_token).
+API_TOKEN_PREFIX = "mh_"
 
 
 class AuthError(AppError):
@@ -46,17 +50,39 @@ def _dev_admin() -> User:
     )
 
 
+async def _user_from_api_token(request: Request, db: AsyncSession, token: str) -> User:
+    """Resolve a personal API token (Bearer ``mh_...``) to its owner."""
+    record = await api_tokens_repo.get_active_by_hash(db, hash_api_token(token))
+    if record is None:
+        raise AuthError("Invalid or revoked API token.")
+    user = await users_repo.get_by_id(db, record.user_id)
+    if not user or not user.is_active:
+        raise AuthError("Account not found or disabled.")
+    request.state.user_id = user.id
+    request.state.token_scope = record.scope  # "read" | "write"
+    return user
+
+
 async def current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
-    """Resolve the authenticated user from the Bearer access token."""
+    """Resolve the authenticated user from a Bearer credential.
+
+    Accepts either a short-lived access JWT or a personal API token
+    (``mh_...``). When ``AUTH_MODE=none`` a synthetic admin is returned.
+    """
     if settings.auth_mode == "none":
         user = _dev_admin()
         request.state.user_id = user.id
+        request.state.token_scope = "write"
         return user
 
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise AuthError("Missing bearer token.")
     token = auth[7:]
+
+    if token.startswith(API_TOKEN_PREFIX):
+        return await _user_from_api_token(request, db, token)
+
     try:
         payload = decode_token(token)
     except jwt.PyJWTError:
@@ -68,6 +94,8 @@ async def current_user(request: Request, db: AsyncSession = Depends(get_db)) -> 
     if not user or not user.is_active:
         raise AuthError("Account not found or disabled.")
     request.state.user_id = user.id
+    # Interactive sessions have full write scope.
+    request.state.token_scope = "write"
     return user
 
 
@@ -78,6 +106,22 @@ def require_role(minimum: str):
     async def _checker(user: User = Depends(current_user)) -> User:
         if ROLE_RANK.get(user.role, 0) < threshold:
             raise ForbiddenError(f"Requires '{minimum}' role or higher.")
+        return user
+
+    return _checker
+
+
+def require_scope(scope: str):
+    """Return a dependency requiring a token scope (``read`` < ``write``).
+
+    Interactive (JWT) sessions always have ``write``; API tokens carry the
+    scope chosen at creation time.
+    """
+
+    async def _checker(request: Request, user: User = Depends(current_user)) -> User:
+        granted = getattr(request.state, "token_scope", "write")
+        if scope == "write" and granted != "write":
+            raise ForbiddenError("This API token is read-only.")
         return user
 
     return _checker

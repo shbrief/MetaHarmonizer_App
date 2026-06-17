@@ -54,3 +54,21 @@ class RoleUpdate(BaseModel):
 class ActiveUpdate(BaseModel):
     is_active: bool
 
+
+class ApiTokenCreate(BaseModel):
+    scope: Literal["read", "write"] = "read"
+
+
+class ApiTokenInfo(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    scope: str
+    created_at: datetime
+    revoked_at: datetime | None = None
+
+
+class ApiTokenCreated(ApiTokenInfo):
+    # The plaintext token, returned exactly once at creation time.
+    token: str
+
