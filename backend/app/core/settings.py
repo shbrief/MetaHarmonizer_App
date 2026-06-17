@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # ── Web / CORS ──────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
 
+    # ── Boundary limits (spec §6.4) ─────────────────────────────────────────
+    max_upload_mb: int = 50
+    max_columns: int = 500
+    max_rows: int = 100_000
+
     # ── Observability ───────────────────────────────────────────────────────
     log_level: Literal["debug", "info", "warning", "error"] = "info"
     sentry_dsn: str | None = None

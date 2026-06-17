@@ -7,7 +7,6 @@ Handles file upload, triggers the harmonization pipeline, and returns results.
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 from pathlib import Path
 
@@ -17,6 +16,8 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app import database as db
+from app.core.settings import settings
+from app.core.uploads import check_table_shape, check_upload_size
 from app.engine_adapter import EngineProtocol, get_engine
 from app.models import HarmonizeResponse, StudyOut
 from app.services.harmonizer import generate_study_id
@@ -53,8 +54,18 @@ async def harmonize_study(
     study_id = generate_study_id(file.filename)
     save_path = UPLOAD_DIR / f"{study_id}{suffix}"
 
+    # Stream to disk while enforcing the size cap (spec §6.4) — avoids holding
+    # a large upload fully in memory before rejecting it.
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    written = 0
     with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        while chunk := await file.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                f.close()
+                save_path.unlink(missing_ok=True)
+                check_upload_size(written, settings.max_upload_mb)  # raises 413
+            f.write(chunk)
 
     # Read data
     sep = "\t" if suffix in (".tsv", ".txt") else ","
@@ -62,6 +73,14 @@ async def harmonize_study(
         raw_df = pd.read_csv(save_path, sep=sep, low_memory=False)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}")
+
+    # Enforce column/row caps (spec §6.4) before any expensive engine work.
+    check_table_shape(
+        n_rows=len(raw_df),
+        n_cols=len(raw_df.columns),
+        max_rows=settings.max_rows,
+        max_cols=settings.max_columns,
+    )
 
     if not CURATED_PATH.exists():
         raise HTTPException(
