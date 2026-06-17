@@ -43,6 +43,7 @@ export default function UploadPage() {
       setResult(res);
       setState('success');
       qc.invalidateQueries({ queryKey: ['studies'] });
+      qc.invalidateQueries({ queryKey: ['overview'] });
       toast.success('Harmonization complete');
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Upload failed';

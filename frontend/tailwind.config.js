@@ -52,17 +52,37 @@ export default {
       },
       boxShadow: {
         soft: '0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06)',
-        card: '0 1px 3px 0 rgb(15 23 42 / 0.06), 0 8px 24px -12px rgb(15 23 42 / 0.12)',
-        pop: '0 10px 30px -10px rgb(15 23 42 / 0.25)',
+        card: '0 1px 3px 0 rgb(15 23 42 / 0.05), 0 12px 32px -16px rgb(15 23 42 / 0.18)',
+        pop: '0 12px 40px -12px rgb(15 23 42 / 0.28)',
+        glow: '0 0 0 1px rgb(59 102 245 / 0.12), 0 12px 40px -12px rgb(59 102 245 / 0.35)',
+      },
+      backgroundImage: {
+        'grid-slate':
+          'linear-gradient(to right, rgb(15 23 42 / 0.035) 1px, transparent 1px), linear-gradient(to bottom, rgb(15 23 42 / 0.035) 1px, transparent 1px)',
+        'mesh-primary':
+          'radial-gradient(at 20% 20%, rgb(59 102 245 / 0.14) 0px, transparent 50%), radial-gradient(at 80% 0%, rgb(23 173 132 / 0.10) 0px, transparent 50%), radial-gradient(at 80% 100%, rgb(99 102 241 / 0.10) 0px, transparent 50%)',
+      },
+      backgroundSize: {
+        grid: '28px 28px',
       },
       keyframes: {
         'fade-in': {
-          from: { opacity: '0', transform: 'translateY(4px)' },
+          from: { opacity: '0', transform: 'translateY(6px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'fade-in-fast': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        float: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-6px)' },
         },
       },
       animation: {
-        'fade-in': 'fade-in 0.25s ease-out',
+        'fade-in': 'fade-in 0.3s ease-out both',
+        'fade-in-fast': 'fade-in-fast 0.2s ease-out both',
+        float: 'float 6s ease-in-out infinite',
       },
     },
   },

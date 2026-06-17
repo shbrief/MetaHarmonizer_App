@@ -19,7 +19,8 @@ from app import database as db
 from app.core.settings import settings
 from app.core.uploads import check_upload_size
 from app.engine_adapter import EngineProtocol, get_engine
-from app.models import HarmonizeResponse, StudyOut
+from app.models import HarmonizeResponse, OverviewResponse, StudyOut
+from app.services.analytics import compute_overview
 from app.services.harmonizer import generate_study_id
 
 router = APIRouter(prefix="/api/v1", tags=["harmonize"])
@@ -143,6 +144,12 @@ async def get_harmonization_results(job_id: str):
 async def list_studies():
     """List all harmonized studies."""
     return db.list_studies()
+
+
+@router.get("/overview", response_model=OverviewResponse)
+async def get_overview():
+    """Portfolio-wide harmonization summary for the home dashboard."""
+    return compute_overview()
 
 
 @router.get("/studies/{study_id}", response_model=StudyOut)

@@ -1,5 +1,5 @@
 import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
-import { Upload, Table2, BarChart3, Download, Microscope, Shield } from 'lucide-react';
+import { LayoutDashboard, Upload, Table2, BarChart3, Download, Microscope, Shield } from 'lucide-react';
 import { lazy, Suspense, type ReactNode } from 'react';
 import Brand from './components/Brand';
 import UserMenu from './components/UserMenu';
@@ -10,6 +10,7 @@ import { useAuth } from './context/AuthContext';
 // Eager: tiny entry pages. Lazy: heavier feature pages (code-split per route).
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const UploadPage = lazy(() => import('./pages/UploadPage'));
 const MappingReview = lazy(() => import('./pages/MappingReview'));
 const OntologyReview = lazy(() => import('./pages/OntologyReview'));
@@ -19,7 +20,8 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 
 const NAV_ITEMS = [
-  { to: '/', icon: Upload, label: 'Upload', end: true },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  { to: '/upload', icon: Upload, label: 'Upload', end: false },
   { to: '/review', icon: Table2, label: 'Mapping Review', end: false },
   { to: '/ontology', icon: Microscope, label: 'Ontology', end: false },
   { to: '/quality', icon: BarChart3, label: 'Quality', end: false },
@@ -95,12 +97,19 @@ function TopNav() {
 
 function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
+    <div className="relative flex min-h-screen flex-col">
+      {/* Layered ambient background */}
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-slate-50" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-mesh-primary" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-grid-slate bg-grid [mask-image:radial-gradient(ellipse_at_top,black,transparent_70%)]" />
+
       <TopNav />
-      <main className="mx-auto w-full max-w-7xl flex-1 animate-fade-in px-4 py-8 sm:px-6 lg:px-8">
-        <Suspense fallback={<LoadingBlock />}>{children}</Suspense>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
+        <Suspense fallback={<LoadingBlock />}>
+          <div className="animate-fade-in">{children}</div>
+        </Suspense>
       </main>
-      <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
+      <footer className="border-t border-slate-200 bg-white/60 py-4 text-center text-xs text-slate-400 backdrop-blur">
         MetaHarmonizer Dashboard · Biomedical Metadata Harmonization · cBioPortal Compatible
       </footer>
     </div>
@@ -134,7 +143,8 @@ export default function App() {
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
       <Route path="/register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
 
-      <Route path="/" element={<Shell><UploadPage /></Shell>} />
+      <Route path="/" element={<Shell><DashboardPage /></Shell>} />
+      <Route path="/upload" element={<Shell><UploadPage /></Shell>} />
       <Route path="/review" element={<Shell><MappingReview /></Shell>} />
       <Route path="/review/:studyId" element={<Shell><MappingReview /></Shell>} />
       <Route path="/ontology" element={<Shell><OntologyReview /></Shell>} />

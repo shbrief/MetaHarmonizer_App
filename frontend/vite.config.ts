@@ -19,6 +19,7 @@ export default defineConfig({
                     'react-vendor': ['react', 'react-dom', 'react-router-dom'],
                     charts: ['recharts'],
                     query: ['@tanstack/react-query'],
+                    motion: ['framer-motion'],
                 },
             },
         },

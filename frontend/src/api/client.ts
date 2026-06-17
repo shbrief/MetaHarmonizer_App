@@ -10,6 +10,7 @@ import type {
     Mapping,
     OntologyMapping,
     OntologySearchResult,
+    Overview,
     QualityMetrics,
     Study,
 } from './types';
@@ -25,6 +26,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function listStudies(): Promise<Study[]> {
     return request<Study[]>(`${BASE}/studies`);
+}
+
+export async function getOverview(): Promise<Overview> {
+    return request<Overview>(`${BASE}/overview`);
 }
 
 export async function getStudy(id: string): Promise<Study> {
