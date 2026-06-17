@@ -55,6 +55,12 @@ export default function MappingReview() {
   const [editField, setEditField] = useState('');
   const [editNote, setEditNote] = useState('');
 
+  // Keep the selected study in sync with the URL param (e.g. when the study
+  // picker navigates from /review to /review/:studyId).
+  useEffect(() => {
+    setSelectedId(studyId ?? null);
+  }, [studyId]);
+
   // Load mappings when study selected
   useEffect(() => {
     if (!selectedId) return;

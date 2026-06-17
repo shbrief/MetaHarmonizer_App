@@ -33,6 +33,12 @@ export default function OntologyReview() {
   const [searchResults, setSearchResults] = useState<OntologySearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
+  // Keep the selected study in sync with the URL param (so the study picker
+  // navigating from /ontology to /ontology/:studyId actually opens the study).
+  useEffect(() => {
+    setSelectedId(studyId ?? null);
+  }, [studyId]);
+
   useEffect(() => {
     if (!selectedId) return;
     setLoading(true);
