@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     # Lock an account after this many consecutive failed logins.
     login_max_failures: int = 5
     login_lockout_min: int = 15
+    # Reject signups whose password appears in a known breach (HIBP, fail-open).
+    hibp_check: bool = True
 
     # ── Web / CORS ──────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:5173,http://localhost:8080"

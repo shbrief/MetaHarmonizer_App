@@ -20,6 +20,8 @@ redis==5.0.8
 # --- Observability --------------------------------------------------------
 # Optional: error tracking. init_sentry() no-ops if unset/uninstalled.
 sentry-sdk[fastapi]==2.14.0
+# Prometheus golden-signal metrics at admin-scoped /metrics.
+prometheus-client==0.21.0
 
 # --- Auth (Sprint 3) ------------------------------------------------------
 argon2-cffi==23.1.0

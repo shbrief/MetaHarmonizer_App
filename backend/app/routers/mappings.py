@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app import database as db
+from app.core.deps import require_role
 from app.models import (
     BatchUpdateRequest,
     BatchUpdateResponse,
@@ -33,7 +34,7 @@ async def get_study_mappings(study_id: str):
 
 
 @router.post("/{mapping_id}/accept", response_model=MappingOut)
-async def accept_mapping(mapping_id: int):
+async def accept_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
     """Accept an automated mapping."""
     mapping = db.get_mapping(mapping_id)
     if not mapping:
@@ -53,7 +54,7 @@ async def accept_mapping(mapping_id: int):
 
 
 @router.post("/{mapping_id}/reject", response_model=MappingOut)
-async def reject_mapping(mapping_id: int):
+async def reject_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
     """Reject an automated mapping."""
     mapping = db.get_mapping(mapping_id)
     if not mapping:
@@ -73,7 +74,9 @@ async def reject_mapping(mapping_id: int):
 
 
 @router.post("/{mapping_id}/edit", response_model=MappingOut)
-async def edit_mapping(mapping_id: int, body: MappingEditRequest):
+async def edit_mapping(
+    mapping_id: int, body: MappingEditRequest, _curator=Depends(require_role("curator"))
+):
     """Curator manually edits a mapping to a different field."""
     mapping = db.get_mapping(mapping_id)
     if not mapping:
@@ -98,7 +101,9 @@ async def edit_mapping(mapping_id: int, body: MappingEditRequest):
 
 
 @router.post("/batch", response_model=BatchUpdateResponse)
-async def batch_update_mappings(body: BatchUpdateRequest):
+async def batch_update_mappings(
+    body: BatchUpdateRequest, _curator=Depends(require_role("curator"))
+):
     """Batch accept or reject multiple mappings."""
     if not body.mapping_ids:
         raise HTTPException(status_code=400, detail="No mapping IDs provided")
@@ -124,7 +129,7 @@ async def batch_update_mappings(body: BatchUpdateRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/{mapping_id}/llm")
-async def llm_rematch(mapping_id: int):
+async def llm_rematch(mapping_id: int, _curator=Depends(require_role("curator"))):
     """
     Re-run Stage 4 (LLM / Gemini) for a single mapping on demand.
 

@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Depends, Response, status
+
+from app.core.deps import require_role
+from app.core.metrics import render_metrics
 
 router = APIRouter(tags=["health"])
 
@@ -75,3 +78,9 @@ async def readyz(response: Response) -> dict[str, object]:
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return {"ready": ready, "checks": checks}
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics(_admin=Depends(require_role("admin"))) -> Response:
+    """Prometheus exposition (admin-scoped) — golden signals + auth failures."""
+    return render_metrics()

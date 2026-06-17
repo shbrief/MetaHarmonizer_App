@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import AuthError, current_user
 from app.core.errors import AppError
+from app.core.hibp import password_breach_count
+from app.core.metrics import AUTH_FAILURES
 from app.core.redis import get_redis
 from app.core.security import (
     REFRESH_COOKIE,
@@ -62,6 +64,11 @@ class EmailTakenError(AppError):
 class AccountLockedError(AppError):
     code = "ACCOUNT_LOCKED"
     status_code = 429
+
+
+class WeakPasswordError(AppError):
+    code = "WEAK_PASSWORD"
+    status_code = 422
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -158,6 +165,12 @@ async def register(
     if await users_repo.get_by_email(db, body.email):
         raise EmailTakenError("An account with this email already exists.")
 
+    # Reject passwords known to be compromised (HIBP, fail-open on network error).
+    if settings.hibp_check and await password_breach_count(body.password) > 0:
+        raise WeakPasswordError(
+            "This password has appeared in a data breach. Please choose a different one."
+        )
+
     # Bootstrap: first user is admin, the rest are curators.
     role = "admin" if await users_repo.count_users(db) == 0 else "curator"
 
@@ -189,6 +202,7 @@ async def login(
         or not verify_password(body.password, user.password_hash)
     ):
         await _record_failure(body.email)
+        AUTH_FAILURES.inc()
         raise AuthError("Incorrect email or password.")
     if not user.is_active:
         raise AuthError("This account is disabled.")

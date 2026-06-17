@@ -258,6 +258,32 @@ class JobRun(Base):
     )
 
 
+class JobFailure(Base):
+    """Dead-letter record for a job that exhausted its retries (spec §6.3).
+
+    Admins can re-queue or discard from here (surface lands in Sprint 4).
+    """
+
+    __tablename__ = "job_failures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job_runs.id", ondelete="SET NULL")
+    )
+    study_id: Mapped[str | None] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(40))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_job_failures_study_id", "study_id"),)
+
+
 class IdempotencyKey(Base):
     __tablename__ = "idempotency_keys"
 

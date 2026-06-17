@@ -7,10 +7,11 @@ Also returns ontology mappings for a study and allows curator overrides.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from rapidfuzz import fuzz, process
 
 from app import database as db
+from app.core.deps import require_role
 from app.models import OntologyEditRequest, OntologyMappingOut, OntologySearchResult
 from app.services.harmonizer import ONTOLOGY_MAP, _STATIC_NCIT, _load_field_value_dict
 
@@ -108,7 +109,7 @@ async def get_ontology_mappings(study_id: str):
 
 
 @router.post("/mappings/{mapping_id}/accept", response_model=OntologyMappingOut)
-async def accept_ontology_mapping(mapping_id: int):
+async def accept_ontology_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
     """Accept the automated ontology term assignment."""
     result = db.update_ontology_mapping(mapping_id, status="accepted")
     if not result:
@@ -124,7 +125,7 @@ async def accept_ontology_mapping(mapping_id: int):
 
 
 @router.post("/mappings/{mapping_id}/reject", response_model=OntologyMappingOut)
-async def reject_ontology_mapping(mapping_id: int):
+async def reject_ontology_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
     """Reject the automated ontology term assignment."""
     result = db.update_ontology_mapping(mapping_id, status="rejected")
     if not result:
@@ -140,7 +141,9 @@ async def reject_ontology_mapping(mapping_id: int):
 
 
 @router.patch("/mappings/{mapping_id}", response_model=OntologyMappingOut)
-async def edit_ontology_mapping(mapping_id: int, body: OntologyEditRequest):
+async def edit_ontology_mapping(
+    mapping_id: int, body: OntologyEditRequest, _curator=Depends(require_role("curator"))
+):
     """
     Curator manually overrides an ontology term assignment.
 

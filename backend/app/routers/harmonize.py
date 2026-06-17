@@ -16,6 +16,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app import database as db
+from app.core.deps import require_role
 from app.core.settings import settings
 from app.core.uploads import check_upload_size
 from app.engine_adapter import EngineProtocol, get_engine
@@ -37,6 +38,7 @@ CURATED_PATH = (
 async def harmonize_study(
     file: UploadFile = File(...),
     engine: EngineProtocol = Depends(get_engine),
+    _curator=Depends(require_role("curator")),
 ):
     """Upload a clinical metadata file and run the full harmonization pipeline."""
     if not file.filename:

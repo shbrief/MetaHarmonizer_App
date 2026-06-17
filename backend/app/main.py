@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.logging import configure_logging
 from app.core.middleware import install_observability
 from app.core.limits import install_limits
+from app.core.metrics import MetricsMiddleware
 from app.core.sentry import init_sentry
 from app.core.settings import settings
 from app.database import init_db
@@ -51,6 +52,9 @@ app = FastAPI(
 
 # Request-id + unified error envelope (spec §6.1).
 install_observability(app)
+
+# Prometheus golden-signal instrumentation (exposed at admin-scoped /metrics).
+app.add_middleware(MetricsMiddleware)
 
 # Rate-limit + idempotency (spec §6.4); fail-open if Redis is unavailable.
 install_limits(app)

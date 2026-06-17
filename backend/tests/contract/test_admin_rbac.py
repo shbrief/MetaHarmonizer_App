@@ -34,6 +34,7 @@ async def env(database_url, monkeypatch):
 
     domain = f"t{uuid.uuid4().hex[:8]}.example.com"
     monkeypatch.setattr(settings_mod.settings, "allowed_email_domains", domain, raising=False)
+    monkeypatch.setattr(settings_mod.settings, "hibp_check", False, raising=False)
 
     from fastapi import FastAPI
     from app.core.middleware import install_observability
