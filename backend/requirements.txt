@@ -17,6 +17,10 @@ asyncpg==0.29.0
 alembic==1.13.3
 redis==5.0.8
 
+# --- Test ----------------------------------------------------------------
+pytest==8.3.3
+pytest-asyncio==0.24.0
+
 # --- ML engine ------------------------------------------------------------
 # Default ML engine: a pre-built wheel of the upstream metaharmonizer package
 # (ENGINE_IMPL=metaharmonizer — see backend/app/engine_adapter/__init__.py).
