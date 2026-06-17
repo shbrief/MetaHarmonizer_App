@@ -9,6 +9,7 @@ import {
   Copy,
   Check,
   LogOut,
+  User as UserIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import PageHeader from '../components/ui/PageHeader';
@@ -96,8 +97,8 @@ export default function ProfilePage() {
       {/* Account summary */}
       <Card>
         <CardBody className="flex flex-wrap items-center gap-4">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-primary-600 text-lg font-bold text-white">
-            {(user.name || user.email).slice(0, 2).toUpperCase()}
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-primary-600 text-white">
+            <UserIcon className="h-7 w-7" />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-lg font-semibold text-slate-900">{user.name || 'Account'}</p>

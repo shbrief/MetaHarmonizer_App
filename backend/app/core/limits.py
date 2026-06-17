@@ -41,6 +41,12 @@ IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 AUTH_LIMIT = (60, 60)
 ANON_LIMIT = (10, 60)
 
+# Paths exempt from rate limiting. /auth/refresh fires on every page load and
+# is already gated by a valid refresh cookie, so it isn't an unauthenticated
+# brute-force vector the way /auth/login is — counting it against the small anon
+# budget would log legitimate users out on reload. Login/register stay limited.
+RATE_LIMIT_EXEMPT = ("/api/v1/auth/refresh",)
+
 
 def _client_id(request: Request) -> tuple[str, bool]:
     """Return (identity, is_authenticated). User id when available, else IP."""
@@ -53,6 +59,9 @@ def _client_id(request: Request) -> tuple[str, bool]:
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if request.url.path in RATE_LIMIT_EXEMPT:
+            return await call_next(request)
+
         identity, is_auth = _client_id(request)
         limit, window = AUTH_LIMIT if is_auth else ANON_LIMIT
         now = time.time()
