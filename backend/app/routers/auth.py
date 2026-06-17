@@ -1,48 +1,54 @@
 """
-Auth router (Sprint 3, slice 1) — register, login, and current-user.
+Auth router (Sprint 3) — register, login, refresh, logout, sessions, current user.
 
-Slice 1 scope (testable end-to-end):
-  POST /api/v1/auth/register  — create an account (domain-gated), returns access token
-  POST /api/v1/auth/login     — email/password -> access token
-  GET  /api/v1/auth/me        — who am I (requires Bearer access token)
+Token model
+  - Access token: short-lived JWT sent in the ``Authorization: Bearer`` header.
+  - Refresh token: long-lived JWT in an httpOnly cookie, bound to a row in the
+    ``sessions`` table via its ``jti``. The session row is the source of truth
+    for revocation, so logout / "revoke this device" takes effect immediately.
 
-Policy:
+Policy
   - Argon2id password hashing.
-  - Domain-restricted signup: if ALLOWED_EMAIL_DOMAINS is set, only those
-    domains may register; empty list -> registration is closed (admin-invite-only).
-  - Bootstrap: the very first account created becomes ``admin``; everyone else
-    is a ``curator``. (Full admin user-management lands in a later slice.)
-
-Refresh cookies, sessions, RBAC enforcement, API tokens, lockout, and email
-verification arrive in later slices.
+  - Domain-restricted signup (ALLOWED_EMAIL_DOMAINS); empty -> invite-only.
+  - Bootstrap: the first account is ``admin``; everyone else is ``curator``.
+  - Account lockout after LOGIN_MAX_FAILURES consecutive failed logins.
 """
 
 from __future__ import annotations
 
 import jwt
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import AuthError, current_user
 from app.core.errors import AppError
+from app.core.redis import get_redis
 from app.core.security import (
+    REFRESH_COOKIE,
     create_access_token,
+    create_refresh_token,
     decode_token,
     hash_password,
+    new_jti,
     verify_password,
 )
 from app.core.settings import settings
+from app.db.models import User
 from app.db.session import get_db
+from app.repositories import sessions as sessions_repo
 from app.repositories import users as users_repo
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from app.schemas.auth import (
+    LoginRequest,
+    RegisterRequest,
+    SessionOut,
+    TokenResponse,
+    UserOut,
+)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-class AuthError(AppError):
-    code = "AUTH_FAILED"
-    status_code = 401
-
-
+# ── Errors ───────────────────────────────────────────────────────────────────
 class RegistrationClosedError(AppError):
     code = "REGISTRATION_CLOSED"
     status_code = 403
@@ -53,6 +59,12 @@ class EmailTakenError(AppError):
     status_code = 409
 
 
+class AccountLockedError(AppError):
+    code = "ACCOUNT_LOCKED"
+    status_code = 429
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
 def _domain_allowed(email: str) -> bool:
     domains = settings.allowed_email_domain_list
     if not domains:
@@ -60,13 +72,85 @@ def _domain_allowed(email: str) -> bool:
     return email.split("@")[-1].lower() in domains
 
 
-def _token_response(user) -> TokenResponse:
+def _client_ip(request: Request) -> str | None:
+    fwd = request.headers.get("X-Forwarded-For")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=REFRESH_COOKIE,
+        value=token,
+        max_age=settings.refresh_ttl_days * 24 * 3600,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/api/v1/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(REFRESH_COOKIE, path="/api/v1/auth")
+
+
+async def _issue_tokens(
+    db: AsyncSession, response: Response, request: Request, user: User
+) -> tuple[TokenResponse, str]:
+    """Create a session, set the refresh cookie, return (token, jti)."""
+    jti = new_jti()
+    await sessions_repo.create_session(
+        db,
+        user_id=user.id,
+        refresh_jti=jti,
+        ip=_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
+    _set_refresh_cookie(response, create_refresh_token(user_id=user.id, jti=jti))
     access = create_access_token(user_id=user.id, role=user.role, email=user.email)
-    return TokenResponse(access_token=access, user=UserOut.model_validate(user))
+    return TokenResponse(access_token=access, user=UserOut.model_validate(user)), jti
 
 
+# ── Lockout (Redis sliding counter, fail-open) ───────────────────────────────
+def _lock_key(email: str) -> str:
+    return f"login:fail:{email.lower()}"
+
+
+async def _is_locked(email: str) -> bool:
+    try:
+        n = await get_redis().get(_lock_key(email))
+        return bool(n) and int(n) >= settings.login_max_failures
+    except Exception:
+        return False  # fail-open: never lock people out because Redis is down
+
+
+async def _record_failure(email: str) -> None:
+    try:
+        r = get_redis()
+        key = _lock_key(email)
+        n = await r.incr(key)
+        if n == 1:
+            await r.expire(key, settings.login_lockout_min * 60)
+    except Exception:
+        pass
+
+
+async def _clear_failures(email: str) -> None:
+    try:
+        await get_redis().delete(_lock_key(email))
+    except Exception:
+        pass
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────
 @router.post("/register", response_model=TokenResponse, status_code=201)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
     if not _domain_allowed(body.email):
         raise RegistrationClosedError(
             "Registration is restricted to approved email domains."
@@ -84,39 +168,125 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) ->
         name=body.name,
         role=role,
     )
+    tokens, _ = await _issue_tokens(db, response, request, user)
     await db.commit()
-    return _token_response(user)
+    return tokens
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def login(
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    if await _is_locked(body.email):
+        raise AccountLockedError("Too many failed attempts. Try again later.")
     user = await users_repo.get_by_email(db, body.email)
-    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+    if (
+        not user
+        or not user.password_hash
+        or not verify_password(body.password, user.password_hash)
+    ):
+        await _record_failure(body.email)
         raise AuthError("Incorrect email or password.")
     if not user.is_active:
         raise AuthError("This account is disabled.")
-    return _token_response(user)
+    await _clear_failures(body.email)
+    tokens, _ = await _issue_tokens(db, response, request, user)
+    await db.commit()
+    return tokens
 
 
-async def current_user(request: Request, db: AsyncSession = Depends(get_db)):
-    """Dependency: resolve the user from the Bearer access token."""
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise AuthError("Missing bearer token.")
-    token = auth[7:]
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    """Exchange a valid refresh cookie for a new access token, rotating the
+    underlying session (old refresh token is revoked)."""
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if not raw:
+        raise AuthError("Missing refresh token.")
     try:
-        payload = decode_token(token)
+        payload = decode_token(raw)
     except jwt.PyJWTError:
-        raise AuthError("Invalid or expired token.")
-    if payload.get("type") != "access":
+        raise AuthError("Invalid or expired refresh token.")
+    if payload.get("type") != "refresh":
         raise AuthError("Wrong token type.")
+
+    session = await sessions_repo.get_active_by_jti(db, payload.get("jti", ""))
+    if session is None:
+        raise AuthError("Session has been revoked.")
     user = await users_repo.get_by_id(db, int(payload["sub"]))
     if not user or not user.is_active:
         raise AuthError("Account not found or disabled.")
-    request.state.user_id = user.id
-    return user
+
+    await sessions_repo.revoke_by_jti(db, session.refresh_jti)
+    tokens, _ = await _issue_tokens(db, response, request, user)
+    await db.commit()
+    return tokens
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if raw:
+        try:
+            payload = decode_token(raw)
+            await sessions_repo.revoke_by_jti(db, payload.get("jti", ""))
+            await db.commit()
+        except jwt.PyJWTError:
+            pass
+    _clear_refresh_cookie(response)
+    response.status_code = 204
+    return response
+
+
+@router.get("/sessions", response_model=list[SessionOut])
+async def list_sessions(
+    request: Request,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SessionOut]:
+    """List the caller's active sessions (devices)."""
+    current_jti = None
+    raw = request.cookies.get(REFRESH_COOKIE)
+    if raw:
+        try:
+            current_jti = decode_token(raw).get("jti")
+        except jwt.PyJWTError:
+            current_jti = None
+
+    rows = await sessions_repo.list_for_user(db, user.id)
+    out: list[SessionOut] = []
+    for s in rows:
+        item = SessionOut.model_validate(s)
+        item.current = s.refresh_jti == current_jti
+        out.append(item)
+    return out
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def revoke_session(
+    session_id: int,
+    response: Response,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Revoke one of the caller's sessions (remote logout of a device)."""
+    await sessions_repo.revoke(db, user_id=user.id, session_id=session_id)
+    await db.commit()
+    response.status_code = 204
+    return response
 
 
 @router.get("/me", response_model=UserOut)
-async def me(user=Depends(current_user)) -> UserOut:
+async def me(user: User = Depends(current_user)) -> UserOut:
     return UserOut.model_validate(user)
+

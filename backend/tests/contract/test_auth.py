@@ -33,6 +33,11 @@ async def client(database_url, monkeypatch):
 
     db_session.SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
+    # Reset the Redis singleton so the lockout code binds to this test's loop.
+    import app.core.redis as redis_mod
+
+    redis_mod._client = None
+
     # Allow a unique throwaway domain for this test run.
     domain = f"t{uuid.uuid4().hex[:8]}.example.com"
     monkeypatch.setattr(settings_mod.settings, "allowed_email_domains", domain, raising=False)
@@ -57,6 +62,7 @@ async def client(database_url, monkeypatch):
         await s.execute(sa.delete(User).where(User.email.like(f"%@{domain}")))
         await s.commit()
     await engine.dispose()
+    redis_mod._client = None
 
 
 async def test_register_login_me_flow(client):
@@ -122,4 +128,83 @@ async def test_me_requires_token(client):
     make_client, domain, _ = client
     async with await make_client() as c:
         r = await c.get("/api/v1/auth/me")
+    assert r.status_code == 401
+
+
+# ── Slice 2: refresh / logout / sessions ─────────────────────────────────────
+async def test_register_sets_refresh_cookie(client):
+    from app.core.security import REFRESH_COOKIE
+
+    make_client, domain, _ = client
+    async with await make_client() as c:
+        r = await c.post(
+            "/api/v1/auth/register",
+            json={"email": f"cook@{domain}", "password": "pw-123456"},
+        )
+        assert r.status_code == 201
+        assert REFRESH_COOKIE in c.cookies
+
+
+async def test_refresh_rotates_and_returns_access(client):
+    make_client, domain, _ = client
+    async with await make_client() as c:
+        await c.post(
+            "/api/v1/auth/register",
+            json={"email": f"refr@{domain}", "password": "pw-123456"},
+        )
+        r = await c.post("/api/v1/auth/refresh")
+        assert r.status_code == 200, r.text
+        assert r.json()["access_token"]
+
+
+async def test_logout_revokes_refresh(client):
+    make_client, domain, _ = client
+    async with await make_client() as c:
+        await c.post(
+            "/api/v1/auth/register",
+            json={"email": f"out@{domain}", "password": "pw-123456"},
+        )
+        r = await c.post("/api/v1/auth/logout")
+        assert r.status_code == 204
+        # Cookie is cleared, and even a stale refresh token is now rejected.
+        r = await c.post("/api/v1/auth/refresh")
+        assert r.status_code == 401
+
+
+async def test_sessions_list_and_revoke(client):
+    make_client, domain, _ = client
+    async with await make_client() as c:
+        reg = await c.post(
+            "/api/v1/auth/register",
+            json={"email": f"sess@{domain}", "password": "pw-123456"},
+        )
+        token = reg.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # A second login creates a second session for the same user.
+        async with await make_client() as c2:
+            await c2.post(
+                "/api/v1/auth/login",
+                json={"email": f"sess@{domain}", "password": "pw-123456"},
+            )
+
+        r = await c.get("/api/v1/auth/sessions", headers=headers)
+        assert r.status_code == 200
+        rows = r.json()
+        assert len(rows) >= 2
+        assert any(s["current"] for s in rows)
+
+        # Revoke a non-current session.
+        other = next(s for s in rows if not s["current"])
+        r = await c.delete(f"/api/v1/auth/sessions/{other['id']}", headers=headers)
+        assert r.status_code == 204
+
+        r = await c.get("/api/v1/auth/sessions", headers=headers)
+        assert all(s["id"] != other["id"] for s in r.json())
+
+
+async def test_refresh_without_cookie_rejected(client):
+    make_client, domain, _ = client
+    async with await make_client() as c:
+        r = await c.post("/api/v1/auth/refresh")
     assert r.status_code == 401

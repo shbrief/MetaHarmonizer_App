@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     refresh_ttl_days: int = 30
     allowed_email_domains: str = ""  # comma-separated; empty -> admin-invite-only
     resend_api_key: str | None = None
+    # Set true in production (HTTPS) so the refresh cookie is Secure-only.
+    cookie_secure: bool = False
+    # Lock an account after this many consecutive failed logins.
+    login_max_failures: int = 5
+    login_lockout_min: int = 15
 
     # ── Web / CORS ──────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
