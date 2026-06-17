@@ -8,7 +8,7 @@ talk to *this* interface only.
 If you need a new capability from the engine, add a method here first,
 then implement it in **every** adapter (vendored / mock / metaharmonizer).
 
-See ``docs/engine-adapter-architecture.md`` and the package README
+See ``docs/metaharmonizerapp-requirements.pdf`` and the package README
 (``backend/app/engine_adapter/README.md``) for full guidance.
 """
 

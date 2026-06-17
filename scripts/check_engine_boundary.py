@@ -10,7 +10,7 @@ Usage (manual):
     python scripts/check_engine_boundary.py path/to/file1.py path/to/file2.py
     python scripts/check_engine_boundary.py            # scans backend/app/
 
-See: docs/engine-adapter-architecture.md §5.1
+See: docs/metaharmonizerapp-requirements.pdf
      backend/app/engine_adapter/README.md
 """
 from __future__ import annotations
@@ -58,7 +58,7 @@ def main(argv: list[str]) -> int:
 
     if errors:
         print("Engine boundary violation — these imports are only allowed inside")
-        print("backend/app/engine_adapter/ (see docs/engine-adapter-architecture.md):")
+        print("backend/app/engine_adapter/ (see backend/app/engine_adapter/README.md):")
         for e in errors:
             print("  " + e)
         return 1

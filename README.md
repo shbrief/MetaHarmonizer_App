@@ -4,7 +4,7 @@
 
 MetaHarmonizer bridges the gap between raw, inconsistent clinical metadata and standardized, ontology-annotated schemas. It combines a multi-stage ML pipeline with an interactive curator review dashboard, enabling researchers to harmonize metadata at scale while maintaining expert oversight.
 
-> **Demo submission** for [GSoC 2026 — Automated Clinical Metadata Harmonization Dashboard](https://github.com/cBioPortal/GSoC/issues/136)
+> **GSoC 2026 project** — [Automated Clinical Metadata Harmonization Dashboard](https://github.com/cBioPortal/GSoC/issues/136)
 
 ---
 
@@ -12,12 +12,12 @@ MetaHarmonizer bridges the gap between raw, inconsistent clinical metadata and s
 
 cBioPortal hosts 400+ cancer genomics studies with clinical metadata from diverse sources. Cross-study metadata heterogeneity severely limits analysis:
 
-| Issue | Examples |
-|-------|----------|
-| **Attribute naming** | `AGE`, `AGE_AT_DIAGNOSIS`, `DIAGNOSIS_AGE` — all mean the same thing |
-| **Value encoding** | Sex recorded as `male`, `M`, `1`, `Male`, `MALE` |
-| **Treatment synonyms** | 24+ variants: `RADIO_THERAPY`, `Rad`, `XRT`, `Radiation`, `RT` |
-| **Staging inconsistency** | `TUMOR_STAGE_2009`, `AJCC_STAGE`, `STAGE`, `PATHOLOGIC_STAGE` |
+| Issue                     | Examples                                                             |
+| ------------------------- | -------------------------------------------------------------------- |
+| **Attribute naming**      | `AGE`, `AGE_AT_DIAGNOSIS`, `DIAGNOSIS_AGE` — all mean the same thing |
+| **Value encoding**        | Sex recorded as `male`, `M`, `1`, `Male`, `MALE`                     |
+| **Treatment synonyms**    | 24+ variants: `RADIO_THERAPY`, `Rad`, `XRT`, `Radiation`, `RT`       |
+| **Staging inconsistency** | `TUMOR_STAGE_2009`, `AJCC_STAGE`, `STAGE`, `PATHOLOGIC_STAGE`        |
 
 Manual harmonization does not scale. MetaHarmonizer automates this using a **4-stage cascade pipeline** backed by dictionary matching, ontology resolution, semantic embeddings, and optional LLM inference — then presents results in a curator-friendly dashboard for review and correction.
 
@@ -103,11 +103,11 @@ Download results in three formats: harmonized CSV with standardized column names
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | React 18, TypeScript, Tailwind CSS, Recharts, Lucide Icons |
-| **Backend** | FastAPI, Pydantic v2, Uvicorn |
-| **Database** | SQLite (WAL mode, foreign keys, indexes) |
+| Layer         | Technology                                                       |
+| ------------- | ---------------------------------------------------------------- |
+| **Frontend**  | React 18, TypeScript, Tailwind CSS, Recharts, Lucide Icons       |
+| **Backend**   | FastAPI, Pydantic v2, Uvicorn                                    |
+| **Database**  | SQLite (WAL mode, foreign keys, indexes)                         |
 | **ML Engine** | SentenceTransformer (`all-MiniLM-L6-v2`), RapidFuzz, NCI EVS API |
 
 ---
@@ -116,11 +116,11 @@ Download results in three formats: harmonized CSV with standardized column names
 
 Provided by the upstream `metaharmonizer` package, wrapped behind `EngineProtocol`.
 
-| Stage | Method | Description |
-|-------|--------|-------------|
-| **Stage 1** | Exact dictionary match | Direct case-insensitive match against the curated standard-field list. |
-| **Stage 2** | Alias match | Looks up known synonyms in `curated_fields_source_latest_with_flags.csv`. |
-| **Stage 3** | Semantic match | SentenceTransformer (`all-MiniLM-L6-v2`) cosine similarity over field names and value samples. |
+| Stage       | Method                              | Description                                                                                          |
+| ----------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Stage 1** | Exact dictionary match              | Direct case-insensitive match against the curated standard-field list.                               |
+| **Stage 2** | Alias match                         | Looks up known synonyms in `curated_fields_source_latest_with_flags.csv`.                            |
+| **Stage 3** | Semantic match                      | SentenceTransformer (`all-MiniLM-L6-v2`) cosine similarity over field names and value samples.       |
 | **Stage 4** | LLM query rewrite + FAISS re-search | Optional Gemini call to rewrite ambiguous queries, then re-rank. Off unless `GOOGLE_API_KEY` is set. |
 
 Columns flow through stages sequentially. A high-confidence match at any stage skips later stages. Unmapped columns surface in the curator review for manual override or on-demand LLM rematch.
@@ -130,10 +130,12 @@ Columns flow through stages sequentially. A high-confidence match at any stage s
 ## Quick Start
 
 ### Prerequisites
+
 - Python 3.11+
 - Node.js 18+
 
 ### Backend
+
 ```bash
 cd backend
 python -m venv venv
@@ -146,28 +148,29 @@ uvicorn app.main:app --reload --port 8000
 The upstream `metaharmonizer` engine is installed from a pre-built wheel under [backend/vendor/](backend/vendor/README.md) so installation works on Windows, Linux and macOS without any special steps.
 
 ### Frontend
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:5173 |
-| Backend API | http://localhost:8000 |
+| Service            | URL                        |
+| ------------------ | -------------------------- |
+| Frontend           | http://localhost:5173      |
+| Backend API        | http://localhost:8000      |
 | API Docs (Swagger) | http://localhost:8000/docs |
 
 ---
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENGINE_IMPL` | `metaharmonizer` | Select the engine adapter. `mock` switches to the deterministic in-process engine used by tests. |
-| `METAHARMONIZER_DATA_DIR` | `backend/data` | Where the upstream package looks for `schema/ncit_descendants.json`, `schema/field_value_dict.json`, and `schema/curated_fields_source_latest_with_flags.csv`. The adapter auto-points here when unset. |
-| `GOOGLE_API_KEY` | — | Required to enable upstream Stage 4 LLM query rewriting (Gemini). |
-| `FIELD_VALUE_JSON` | `backend/data/schema/field_value_dict.json` | Override path to the dashboard-owned value-level ontology dictionary. |
+| Variable                  | Default                                     | Description                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENGINE_IMPL`             | `metaharmonizer`                            | Select the engine adapter. `mock` switches to the deterministic in-process engine used by tests.                                                                                                        |
+| `METAHARMONIZER_DATA_DIR` | `backend/data`                              | Where the upstream package looks for `schema/ncit_descendants.json`, `schema/field_value_dict.json`, and `schema/curated_fields_source_latest_with_flags.csv`. The adapter auto-points here when unset. |
+| `GOOGLE_API_KEY`          | —                                           | Required to enable upstream Stage 4 LLM query rewriting (Gemini).                                                                                                                                       |
+| `FIELD_VALUE_JSON`        | `backend/data/schema/field_value_dict.json` | Override path to the dashboard-owned value-level ontology dictionary.                                                                                                                                   |
 
 ---
 
@@ -175,38 +178,38 @@ npm run dev
 
 **Schema Mapping**
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/harmonize` | POST | Upload file and run harmonization pipeline |
-| `/api/v1/harmonize/{job_id}` | GET | Poll job status and results |
-| `/api/v1/studies` | GET | List all studies |
-| `/api/v1/mappings/{study_id}` | GET | Get all column mappings for a study |
-| `/api/v1/mappings/{study_id}/suggestions` | GET | Low-confidence/unmapped columns with alternatives |
-| `/api/v1/mappings/{id}/accept` | POST | Accept a mapping |
-| `/api/v1/mappings/{id}/reject` | POST | Reject a mapping |
-| `/api/v1/mappings/{id}/edit` | POST | Manually override a mapping |
-| `/api/v1/mappings/{id}/llm` | POST | Trigger on-demand LLM rematch (requires `GEMINI_API_KEY`) |
-| `/api/v1/mappings/batch` | POST | Batch accept/reject mappings |
+| Endpoint                                  | Method | Description                                               |
+| ----------------------------------------- | ------ | --------------------------------------------------------- |
+| `/api/v1/harmonize`                       | POST   | Upload file and run harmonization pipeline                |
+| `/api/v1/harmonize/{job_id}`              | GET    | Poll job status and results                               |
+| `/api/v1/studies`                         | GET    | List all studies                                          |
+| `/api/v1/mappings/{study_id}`             | GET    | Get all column mappings for a study                       |
+| `/api/v1/mappings/{study_id}/suggestions` | GET    | Low-confidence/unmapped columns with alternatives         |
+| `/api/v1/mappings/{id}/accept`            | POST   | Accept a mapping                                          |
+| `/api/v1/mappings/{id}/reject`            | POST   | Reject a mapping                                          |
+| `/api/v1/mappings/{id}/edit`              | POST   | Manually override a mapping                               |
+| `/api/v1/mappings/{id}/llm`               | POST   | Trigger on-demand LLM rematch (requires `GEMINI_API_KEY`) |
+| `/api/v1/mappings/batch`                  | POST   | Batch accept/reject mappings                              |
 
 **Ontology Value Mapping**
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/ontology/search` | GET | Fuzzy search across NCIT/UBERON/OHMI terms |
-| `/api/v1/ontology/mappings/{study_id}` | GET | Get all value-level ontology mappings |
-| `/api/v1/ontology/mappings/{id}/accept` | POST | Accept an ontology assignment |
-| `/api/v1/ontology/mappings/{id}/reject` | POST | Reject an ontology assignment |
-| `/api/v1/ontology/mappings/{id}` | PATCH | Curator override with custom term/ID |
+| Endpoint                                | Method | Description                                |
+| --------------------------------------- | ------ | ------------------------------------------ |
+| `/api/v1/ontology/search`               | GET    | Fuzzy search across NCIT/UBERON/OHMI terms |
+| `/api/v1/ontology/mappings/{study_id}`  | GET    | Get all value-level ontology mappings      |
+| `/api/v1/ontology/mappings/{id}/accept` | POST   | Accept an ontology assignment              |
+| `/api/v1/ontology/mappings/{id}/reject` | POST   | Reject an ontology assignment              |
+| `/api/v1/ontology/mappings/{id}`        | PATCH  | Curator override with custom term/ID       |
 
 **Quality & Export**
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/quality/{study_id}` | GET | Coverage, confidence, stage breakdown |
-| `/api/v1/quality/{study_id}/evaluate` | POST | F1/precision/recall vs ground-truth CSV |
-| `/api/v1/export/{study_id}/harmonized` | GET | Harmonized CSV with standardized column names |
-| `/api/v1/export/{study_id}/cbioportal` | GET | cBioPortal-compatible TSV (4-line header) |
-| `/api/v1/export/{study_id}/report` | GET | JSON audit report |
+| Endpoint                               | Method | Description                                   |
+| -------------------------------------- | ------ | --------------------------------------------- |
+| `/api/v1/quality/{study_id}`           | GET    | Coverage, confidence, stage breakdown         |
+| `/api/v1/quality/{study_id}/evaluate`  | POST   | F1/precision/recall vs ground-truth CSV       |
+| `/api/v1/export/{study_id}/harmonized` | GET    | Harmonized CSV with standardized column names |
+| `/api/v1/export/{study_id}/cbioportal` | GET    | cBioPortal-compatible TSV (4-line header)     |
+| `/api/v1/export/{study_id}/report`     | GET    | JSON audit report                             |
 
 ---
 
@@ -246,21 +249,21 @@ metaHarmonizer/
 
 ## Sample Data
 
-| File | Description |
-|------|-------------|
+| File                                | Description                                                       |
+| ----------------------------------- | ----------------------------------------------------------------- |
 | `metadata_samples/curated_meta.csv` | Reference schema — 37 standardized columns with ontology term IDs |
-| `metadata_samples/new_meta.csv` | Raw metadata — 131 heterogeneous columns from multiple studies |
+| `metadata_samples/new_meta.csv`     | Raw metadata — 131 heterogeneous columns from multiple studies    |
 
 ---
 
 ## Performance
 
-| Metric | Value |
-|--------|-------|
-| Upload-to-results (141 columns) | **< 2 second** |
-| Cold start (original, incl. model download) | ~235 seconds |
-| Cold start (model cached, NCI enabled) | ~120 seconds |
-| Optimization | 99%+ latency reduction via engine caching, background pre-warming |
+| Metric                                      | Value                                                             |
+| ------------------------------------------- | ----------------------------------------------------------------- |
+| Upload-to-results (141 columns)             | **< 2 second**                                                    |
+| Cold start (original, incl. model download) | ~235 seconds                                                      |
+| Cold start (model cached, NCI enabled)      | ~120 seconds                                                      |
+| Optimization                                | 99%+ latency reduction via engine caching, background pre-warming |
 
 ---
 
@@ -269,4 +272,3 @@ metaHarmonizer/
 - [MetaHarmonizer Engine](https://github.com/shbrief/MetaHarmonizer) — Core ML pipeline for schema mapping
 - [cBioPortal](https://www.cbioportal.org/) — Target schema standard for cancer genomics
 - [NCI Thesaurus (NCIt)](https://ncithesaurus.nci.nih.gov/) — Biomedical ontology for value normalization
-

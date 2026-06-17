@@ -42,13 +42,13 @@ backend/app/engine_adapter/
 └── README.md               # this file
 ```
 
-| File | Purpose | When you edit it |
-|---|---|---|
-| `protocol.py` | The methods the rest of the app may call. | Adding a new capability. |
-| `types.py`    | Stable DTO shapes (Pydantic). | Adding/changing a payload field. |
-| `metaharmonizer_impl.py` | Wraps the upstream pip package. | Upstream renames a field — fix `_to_dashboard_row` only. |
-| `mock_impl.py` | Used by every unit test. | Adding a new protocol method (must match shape). |
-| `__init__.py` | Factory + cache. | Almost never — `get_engine()` is stable API. |
+| File                     | Purpose                                   | When you edit it                                         |
+| ------------------------ | ----------------------------------------- | -------------------------------------------------------- |
+| `protocol.py`            | The methods the rest of the app may call. | Adding a new capability.                                 |
+| `types.py`               | Stable DTO shapes (Pydantic).             | Adding/changing a payload field.                         |
+| `metaharmonizer_impl.py` | Wraps the upstream pip package.           | Upstream renames a field — fix `_to_dashboard_row` only. |
+| `mock_impl.py`           | Used by every unit test.                  | Adding a new protocol method (must match shape).         |
+| `__init__.py`            | Factory + cache.                          | Almost never — `get_engine()` is stable API.             |
 
 ---
 
@@ -56,10 +56,10 @@ backend/app/engine_adapter/
 
 Selected at runtime by the **`ENGINE_IMPL`** environment variable:
 
-| Value | Adapter | When to use |
-|---|---|---|
-| `metaharmonizer` (default) | `MetaHarmonizerAdapter` → `pip install metaharmonizer` | Normal operation. |
-| `mock` | `MockEngineAdapter` | Tests, local UI work, demos without GPU/torch. |
+| Value                      | Adapter                                                | When to use                                    |
+| -------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
+| `metaharmonizer` (default) | `MetaHarmonizerAdapter` → `pip install metaharmonizer` | Normal operation.                              |
+| `mock`                     | `MockEngineAdapter`                                    | Tests, local UI work without GPU/torch.        |
 
 The upstream package looks for its schema files (`ncit_descendants.json`,
 `field_value_dict.json`, optional alias dict) under
@@ -201,14 +201,14 @@ One allowance exists (see the script):
 
 ## 6. Migration status
 
-| Step | What | Status |
-|---|---|---|
-| 1 | Seam created, routers go through `Depends(get_engine)` | Done |
-| 2 | `MockEngineAdapter` available | Done |
-| 3 | `MetaHarmonizerAdapter` + opt-in `requirements.txt` line | Done |
-| 4 | Default flipped to `metaharmonizer` | Done |
-| 5 | `backend/engine/` and `backend/engine_upstream/` deleted | Done |
-| 6 | Pre-commit + CI | Done |
+| Step | What                                                     | Status |
+| ---- | -------------------------------------------------------- | ------ |
+| 1    | Seam created, routers go through `Depends(get_engine)`   | Done   |
+| 2    | `MockEngineAdapter` available                            | Done   |
+| 3    | `MetaHarmonizerAdapter` + opt-in `requirements.txt` line | Done   |
+| 4    | Default flipped to `metaharmonizer`                      | Done   |
+| 5    | `backend/engine/` and `backend/engine_upstream/` deleted | Done   |
+| 6    | Pre-commit + CI                                          | Done   |
 
 Migration complete. New work goes straight into
 [`metaharmonizer_impl.py`](metaharmonizer_impl.py) or, for behaviour
@@ -228,6 +228,7 @@ wired through `map_values`, those tables will be retired — see
 proposal §1.4.4.
 
 **Q. Why two adapters instead of one?**
+
 - `metaharmonizer` is what runs in production and dev.
 - `mock` is what gives us fast tests — no torch, no internet, ~1 ms/call.
 
