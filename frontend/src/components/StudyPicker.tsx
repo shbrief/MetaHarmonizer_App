@@ -60,6 +60,9 @@ export default function StudyPicker({
                       <span>{s.column_count ?? '—'} columns</span>
                       {s.status && <Badge tone="slate">{s.status}</Badge>}
                     </p>
+                    {s.upload_date && (
+                      <p className="mt-0.5 text-[11px] text-slate-400">Uploaded {timeAgo(s.upload_date)}</p>
+                    )}
                   </div>
                 </div>
                 <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-primary-500" />
@@ -91,4 +94,16 @@ export function StudySelect({
       ))}
     </select>
   );
+}
+
+/** Human-friendly relative time, e.g. "just now", "3m ago", "2h ago", "5d ago". */
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(diff)) return '';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
