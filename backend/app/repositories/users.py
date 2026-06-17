@@ -21,6 +21,11 @@ async def count_users(db: AsyncSession) -> int:
     return await db.scalar(select(func.count()).select_from(User)) or 0
 
 
+async def list_users(db: AsyncSession) -> list[User]:
+    stmt = select(User).order_by(User.created_at.asc())
+    return list(await db.scalars(stmt))
+
+
 async def create_user(
     db: AsyncSession,
     *,

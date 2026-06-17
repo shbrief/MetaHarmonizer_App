@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -44,3 +45,12 @@ class SessionOut(BaseModel):
     created_at: datetime
     last_seen: datetime | None = None
     current: bool = False
+
+
+class RoleUpdate(BaseModel):
+    role: Literal["viewer", "curator", "admin"]
+
+
+class ActiveUpdate(BaseModel):
+    is_active: bool
+
