@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import export, harmonize, mappings, ontology, quality
+from app.routers import export, harmonize, health, mappings, ontology, quality
 
 
 @asynccontextmanager
@@ -52,6 +52,7 @@ app.add_middleware(
 )
 
 # Register routers
+app.include_router(health.router)
 app.include_router(harmonize.router)
 app.include_router(mappings.router)
 app.include_router(quality.router)
