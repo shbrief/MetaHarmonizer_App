@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app import database as db
 from app.core.settings import settings
-from app.core.uploads import check_table_shape, check_upload_size
+from app.core.uploads import check_upload_size
 from app.engine_adapter import EngineProtocol, get_engine
 from app.models import HarmonizeResponse, StudyOut
 from app.services.harmonizer import generate_study_id
@@ -73,14 +73,6 @@ async def harmonize_study(
         raw_df = pd.read_csv(save_path, sep=sep, low_memory=False)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}")
-
-    # Enforce column/row caps (spec §6.4) before any expensive engine work.
-    check_table_shape(
-        n_rows=len(raw_df),
-        n_cols=len(raw_df.columns),
-        max_rows=settings.max_rows,
-        max_cols=settings.max_columns,
-    )
 
     if not CURATED_PATH.exists():
         raise HTTPException(

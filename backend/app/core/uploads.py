@@ -1,17 +1,14 @@
 """
-Upload boundary checks (spec §6.4).
+Upload safety guard (spec §6.4).
 
-Pure validation helpers — no FastAPI/Starlette coupling — so they're trivially
-unit-testable and reusable. Raise ``AppError`` subclasses that the error
-envelope maps to the right HTTP status:
-
-  - file too large  -> 413 PayloadTooLarge
-  - too many columns / rows -> 422 ValidationError
+A single byte-size guard against a runaway upload filling the disk / OOMing the
+box — this is server safety, not a study-scale ceiling. There are deliberately
+no row/column count limits: those numbers are scale expectations, not gates.
 """
 
 from __future__ import annotations
 
-from app.core.errors import AppError, ValidationError
+from app.core.errors import AppError
 
 
 class PayloadTooLargeError(AppError):
@@ -25,17 +22,4 @@ def check_upload_size(num_bytes: int, max_mb: int) -> None:
         raise PayloadTooLargeError(
             f"Upload exceeds the {max_mb} MB limit.",
             details={"size_bytes": num_bytes, "limit_bytes": limit},
-        )
-
-
-def check_table_shape(*, n_rows: int, n_cols: int, max_rows: int, max_cols: int) -> None:
-    if n_cols > max_cols:
-        raise ValidationError(
-            f"Study has {n_cols} columns; the limit is {max_cols}.",
-            details={"columns": n_cols, "limit": max_cols},
-        )
-    if n_rows > max_rows:
-        raise ValidationError(
-            f"Study has {n_rows} rows; the limit is {max_rows}.",
-            details={"rows": n_rows, "limit": max_rows},
         )
