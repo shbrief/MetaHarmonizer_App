@@ -14,11 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.logging import configure_logging
 from app.core.middleware import install_observability
 from app.core.limits import install_limits
+from app.core.sentry import init_sentry
 from app.core.settings import settings
 from app.database import init_db
 from app.routers import audit, export, harmonize, health, mappings, ontology, quality
 
 configure_logging(settings.log_level)
+init_sentry()
 
 
 @asynccontextmanager

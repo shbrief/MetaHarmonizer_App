@@ -17,6 +17,10 @@ asyncpg==0.29.0
 alembic==1.13.3
 redis==5.0.8
 
+# --- Observability --------------------------------------------------------
+# Optional: error tracking. init_sentry() no-ops if unset/uninstalled.
+sentry-sdk[fastapi]==2.14.0
+
 # --- Test ----------------------------------------------------------------
 pytest==8.3.3
 pytest-asyncio==0.24.0
