@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     # No row/column ceilings — study scale is guidance, not a gate.
     max_upload_mb: int = 50
 
+    # ── Data retention (spec §6.8) ──────────────────────────────────────────
+    retention_uploads_days: int = 90
+    retention_exports_days: int = 30
+    retention_revoked_sessions_days: int = 90
+
     # ── Observability ───────────────────────────────────────────────────────
     log_level: Literal["debug", "info", "warning", "error"] = "info"
     sentry_dsn: str | None = None
