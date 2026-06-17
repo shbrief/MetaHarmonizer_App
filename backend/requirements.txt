@@ -2,6 +2,7 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 pydantic==2.9.2
+pydantic-settings==2.5.2
 pandas==2.2.3
 rapidfuzz==3.9.7
 numpy==1.26.4
@@ -9,6 +10,12 @@ sentence-transformers==3.0.1
 torch>=2.1.0
 requests>=2.31.0
 google-genai>=1.0.0
+
+# --- Persistence + cache (Sprint 2 / Dev infra) ---------------------------
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.3
+redis==5.0.8
 
 # --- ML engine ------------------------------------------------------------
 # Default ML engine: a pre-built wheel of the upstream metaharmonizer package

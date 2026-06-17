@@ -1,0 +1,17 @@
+# Caddy reverse proxy — dev stub.
+# Fronts the API on http://localhost:8080. In production this gains
+# automatic TLS (Let's Encrypt) + HSTS for the real domain (Sprint: Deployment kit).
+
+:80 {
+	encode gzip
+
+	# WebSocket + HTTP both proxy to the API service.
+	reverse_proxy api:8000
+
+	header {
+		# Minimal hardening even in dev.
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		-Server
+	}
+}

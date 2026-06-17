@@ -1,0 +1,27 @@
+# Keep the build context small and the image clean.
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local data / DBs — never bake into the image
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/uploads/*
+data/schema_mapping_eval/*
+
+# Env + secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store

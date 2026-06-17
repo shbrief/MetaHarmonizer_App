@@ -1,0 +1,102 @@
+# MetaHarmonizer — local development stack.
+# One command brings up Postgres + Redis + API + worker (+ Caddy reverse proxy).
+#   docker compose up        (or: make up)
+#
+# Architecture: docs/adr/0002-system-architecture.md
+# The same image runs the API and the worker; the `command` differs.
+
+name: metaharmonizer
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mh_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-metaharmonizer}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mh} -d ${POSTGRES_DB:-metaharmonizer}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      # Container-internal DSNs override any host-style values in .env.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mh}:${POSTGRES_PASSWORD:-mh_dev_password}@postgres:5432/${POSTGRES_DB:-metaharmonizer}
+      REDIS_URL: redis://redis:6379/0
+      METAHARMONIZER_DATA_DIR: /app/data
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app          # live code reload in dev
+      - engine_cache:/root/.metaharmonizer
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mh}:${POSTGRES_PASSWORD:-mh_dev_password}@postgres:5432/${POSTGRES_DB:-metaharmonizer}
+      REDIS_URL: redis://redis:6379/0
+      METAHARMONIZER_DATA_DIR: /app/data
+    volumes:
+      - ./backend:/app
+      - engine_cache:/root/.metaharmonizer
+    # Worker entry point lands in Sprint 4 (app/workers). Until then this
+    # service is a no-op placeholder so the topology is in place.
+    command: ["python", "-c", "print('worker placeholder — arq worker arrives in Sprint 4'); import time; time.sleep(31536000)"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pg_data:
+  redis_data:
+  engine_cache:
