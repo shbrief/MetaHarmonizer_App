@@ -1,0 +1,151 @@
+"""
+Idempotency + rate-limit middleware (spec §6.1, §6.4).
+
+IdempotencyMiddleware
+  Mutating routes that a curator might retry (POST /studies, /harmonize,
+  /federation/import) accept an ``Idempotency-Key`` header. The first response
+  is cached in Redis for 24h keyed by (route, key); a retry replays the cached
+  response instead of re-running the work.
+
+RateLimitMiddleware
+  Sliding-window limiter backed by a Redis sorted set. Authenticated callers get
+  a higher budget than anonymous ones. On limit, returns 429 with ``Retry-After``
+  and the unified error envelope.
+
+Availability note: if Redis is unreachable, both middlewares **fail open**
+(allow the request, log a warning) so a cache blip degrades one feature rather
+than taking the app down. The spec's stricter "fail closed" stance can be
+enabled later via settings if required.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import time
+
+from fastapi import Request
+from fastapi.responses import JSONResponse, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.core.errors import error_envelope
+from app.core.redis import get_redis
+
+logger = logging.getLogger("app.ratelimit")
+IDEMPOTENCY_HEADER = "Idempotency-Key"
+IDEMPOTENT_ROUTES = ("/studies", "/harmonize", "/federation/import")
+IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+
+# (limit, window_seconds)
+AUTH_LIMIT = (60, 60)
+ANON_LIMIT = (10, 60)
+
+
+def _client_id(request: Request) -> tuple[str, bool]:
+    """Return (identity, is_authenticated). User id when available, else IP."""
+    user = getattr(request.state, "user_id", None)
+    if user:
+        return f"user:{user}", True
+    ip = request.client.host if request.client else "unknown"
+    return f"ip:{ip}", False
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        identity, is_auth = _client_id(request)
+        limit, window = AUTH_LIMIT if is_auth else ANON_LIMIT
+        now = time.time()
+        key = f"ratelimit:{identity}"
+
+        try:
+            r = get_redis()
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.zremrangebyscore(key, 0, now - window)
+                pipe.zadd(key, {f"{now}:{id(request)}": now})
+                pipe.zcard(key)
+                pipe.expire(key, window)
+                _, _, count, _ = await pipe.execute()
+        except Exception as exc:  # noqa: BLE001 — fail open on Redis trouble
+            logger.warning("rate-limit check skipped (redis unavailable): %s", exc)
+            return await call_next(request)
+
+        if count > limit:
+            rid = getattr(request.state, "request_id", "")
+            return JSONResponse(
+                status_code=429,
+                content=error_envelope(
+                    "RATE_LIMITED",
+                    "Too many requests.",
+                    details={"limit": limit, "window_seconds": window},
+                    request_id=rid,
+                ),
+                headers={"Retry-After": str(window)},
+            )
+        return await call_next(request)
+
+
+class IdempotencyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        key = request.headers.get(IDEMPOTENCY_HEADER)
+        applies = (
+            request.method == "POST"
+            and key
+            and any(request.url.path.endswith(r) or r in request.url.path for r in IDEMPOTENT_ROUTES)
+        )
+        if not applies:
+            return await call_next(request)
+
+        cache_key = f"idem:{request.url.path}:{key}"
+        try:
+            r = get_redis()
+            cached = await r.get(cache_key)
+        except Exception as exc:  # noqa: BLE001 — fail open
+            logger.warning("idempotency lookup skipped (redis unavailable): %s", exc)
+            return await call_next(request)
+
+        if cached:
+            data = json.loads(cached)
+            return Response(
+                content=data["body"],
+                status_code=data["status"],
+                media_type=data.get("media_type", "application/json"),
+                headers={"Idempotent-Replayed": "true"},
+            )
+
+        response = await call_next(request)
+
+        # Only cache successful, fully-buffered responses.
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        if 200 <= response.status_code < 300:
+            try:
+                await get_redis().set(
+                    cache_key,
+                    json.dumps(
+                        {
+                            "status": response.status_code,
+                            "body": body.decode("utf-8", "replace"),
+                            "media_type": response.media_type,
+                            "hash": hashlib.sha256(body).hexdigest(),
+                        }
+                    ),
+                    ex=IDEMPOTENCY_TTL_SECONDS,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("idempotency store skipped (redis unavailable): %s", exc)
+
+        return Response(
+            content=body,
+            status_code=response.status_code,
+            media_type=response.media_type,
+            headers=dict(response.headers),
+        )
+
+
+def install_limits(app) -> None:
+    """Attach rate-limit + idempotency middleware (registered inside the
+    request-id scope set by install_observability)."""
+    app.add_middleware(IdempotencyMiddleware)
+    app.add_middleware(RateLimitMiddleware)

@@ -1,0 +1,106 @@
+"""Rate-limit + idempotency middleware tests against the dev Redis (port 6380).
+
+Driven with an in-process ASGI client inside a single event loop (so the async
+Redis client stays on one loop). Skipped automatically if Redis is unreachable.
+"""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+import redis as sync_redis
+from fastapi import FastAPI
+
+import app.core.redis as redis_mod
+from app.core.limits import ANON_LIMIT, install_limits
+from app.core.middleware import install_observability
+
+pytestmark = pytest.mark.asyncio
+
+REDIS_TEST_URL = "redis://127.0.0.1:6380/0"
+
+
+def _redis_up() -> bool:
+    try:
+        sync_redis.from_url(REDIS_TEST_URL, socket_connect_timeout=2).ping()
+        return True
+    except Exception:
+        return False
+
+
+skip_no_redis = pytest.mark.skipif(not _redis_up(), reason="dev Redis not reachable (port 6380)")
+
+
+@pytest.fixture
+async def _redis_clean():
+    r = sync_redis.from_url(REDIS_TEST_URL, decode_responses=True)
+    for pattern in ("ratelimit:*", "idem:*"):
+        for k in r.scan_iter(pattern):
+            r.delete(k)
+    redis_mod._client = None  # rebuild async singleton in the running loop
+    yield
+    for pattern in ("ratelimit:*", "idem:*"):
+        for k in r.scan_iter(pattern):
+            r.delete(k)
+    # Close the async singleton on its own loop to avoid GC-time warnings.
+    if redis_mod._client is not None:
+        await redis_mod._client.aclose()
+        redis_mod._client = None
+
+
+def _app() -> FastAPI:
+    app = FastAPI()
+    install_observability(app)
+    install_limits(app)
+    calls = {"n": 0}
+
+    @app.get("/ping")
+    async def ping():
+        return {"ok": True}
+
+    @app.post("/studies")
+    async def create_study():
+        calls["n"] += 1
+        return {"created": calls["n"]}
+
+    app.state._calls = calls
+    return app
+
+
+def _client(app: FastAPI) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+@skip_no_redis
+async def test_anonymous_rate_limit_returns_429(_redis_clean):
+    limit, _ = ANON_LIMIT
+    app = _app()
+    async with _client(app) as client:
+        for _ in range(limit):
+            assert (await client.get("/ping")).status_code == 200
+        r = await client.get("/ping")
+    assert r.status_code == 429
+    assert r.headers["Retry-After"]
+    assert r.json()["error"]["code"] == "RATE_LIMITED"
+
+
+@skip_no_redis
+async def test_idempotent_post_replays_cached_response(_redis_clean):
+    app = _app()
+    headers = {"Idempotency-Key": "abc-123"}
+    async with _client(app) as client:
+        r1 = await client.post("/studies", headers=headers)
+        r2 = await client.post("/studies", headers=headers)
+    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.json() == r2.json()
+    assert app.state._calls["n"] == 1
+    assert r2.headers.get("Idempotent-Replayed") == "true"
+
+
+@skip_no_redis
+async def test_idempotency_ignored_without_key(_redis_clean):
+    app = _app()
+    async with _client(app) as client:
+        await client.post("/studies")
+        await client.post("/studies")
+    assert app.state._calls["n"] == 2

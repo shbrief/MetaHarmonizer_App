@@ -17,6 +17,7 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://mh:mh_dev_password@127.0.0.1:5433/metaharmonizer",
 )
+os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:6380/0")
 
 
 @pytest.fixture(scope="session")

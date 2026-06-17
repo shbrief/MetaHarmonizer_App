@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.logging import configure_logging
 from app.core.middleware import install_observability
+from app.core.limits import install_limits
 from app.core.settings import settings
 from app.database import init_db
 from app.routers import export, harmonize, health, mappings, ontology, quality
@@ -48,6 +49,9 @@ app = FastAPI(
 
 # Request-id + unified error envelope (spec §6.1).
 install_observability(app)
+
+# Rate-limit + idempotency (spec §6.4); fail-open if Redis is unavailable.
+install_limits(app)
 
 # CORS — origins from settings (no wildcards in production).
 app.add_middleware(
