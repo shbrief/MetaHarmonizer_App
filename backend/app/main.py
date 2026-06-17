@@ -16,7 +16,7 @@ from app.core.middleware import install_observability
 from app.core.limits import install_limits
 from app.core.settings import settings
 from app.database import init_db
-from app.routers import export, harmonize, health, mappings, ontology, quality
+from app.routers import audit, export, harmonize, health, mappings, ontology, quality
 
 configure_logging(settings.log_level)
 
@@ -64,6 +64,7 @@ app.add_middleware(
 
 # Register routers
 app.include_router(health.router)
+app.include_router(audit.router)
 app.include_router(harmonize.router)
 app.include_router(mappings.router)
 app.include_router(quality.router)
