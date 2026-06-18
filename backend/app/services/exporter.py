@@ -17,8 +17,12 @@ import zipfile
 from typing import Any
 
 import pandas as pd
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import database as db
+from app.repositories import audit as audit_repo
+from app.repositories import mappings as mappings_repo
+from app.repositories import ontology as ontology_repo
+from app.repositories import studies as studies_repo
 
 
 # cBioPortal auto-populates these; they must not appear in a clinical data file.
@@ -86,12 +90,14 @@ def _find_id_column(df: pd.DataFrame, candidates: list[str]) -> str:
 # Harmonized CSV
 # ---------------------------------------------------------------------------
 
-def export_harmonized_csv(study_id: str, raw_df: pd.DataFrame) -> str:
+async def export_harmonized_csv(
+    db: AsyncSession, study_id: str, raw_df: pd.DataFrame
+) -> str:
     """
     Produce a harmonized CSV: rename raw columns to their accepted/curated
     mappings, drop unmapped columns, and return CSV text.
     """
-    mappings = db.get_mappings(study_id)
+    mappings = await mappings_repo.get_mappings(db, study_id)
 
     rename_map: dict[str, str] = {}
     keep_cols: list[str] = []
@@ -132,7 +138,9 @@ def export_harmonized_csv(study_id: str, raw_df: pd.DataFrame) -> str:
 # cBioPortal Format
 # ---------------------------------------------------------------------------
 
-def export_cbioportal(study_id: str, raw_df: pd.DataFrame) -> str:
+async def export_cbioportal(
+    db: AsyncSession, study_id: str, raw_df: pd.DataFrame
+) -> str:
     """
     Produce a cBioPortal-format clinical sample data file.
 
@@ -151,7 +159,7 @@ def export_cbioportal(study_id: str, raw_df: pd.DataFrame) -> str:
       - PATIENT_ID: unique patient identifier
       - SAMPLE_ID: unique sample identifier
     """
-    mappings = db.get_mappings(study_id)
+    mappings = await mappings_repo.get_mappings(db, study_id)
 
     # Build column list from accepted / mapped
     cols: list[dict[str, Any]] = []
@@ -317,7 +325,8 @@ def _meta_clinical_sample(cancer_study_identifier: str) -> str:
     )
 
 
-def export_cbioportal_study(
+async def export_cbioportal_study(
+    db: AsyncSession,
     study_id: str,
     raw_df: pd.DataFrame,
     cancer_study_identifier: str | None = None,
@@ -332,14 +341,14 @@ def export_cbioportal_study(
     ``validateData.py`` validates a study directory with meta files, not a lone
     TSV, so this is the artifact a curator actually runs the validator against.
     """
-    study = db.get_study(study_id) or {}
+    study = await studies_repo.get_study(db, study_id) or {}
     identifier = cancer_study_identifier or _sanitize_id(
         study.get("name") or study_id
     ).lower()
     name = study.get("name") or study_id
     description = study.get("description") or f"Harmonized clinical data for {name}."
 
-    data_clinical_sample = export_cbioportal(study_id, raw_df)
+    data_clinical_sample = await export_cbioportal(db, study_id, raw_df)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -353,14 +362,14 @@ def export_cbioportal_study(
 # JSON Mapping Report
 # ---------------------------------------------------------------------------
 
-def export_mapping_report(study_id: str) -> str:
+async def export_mapping_report(db: AsyncSession, study_id: str) -> str:
     """
     Produce a JSON audit report of all mapping decisions.
     """
-    study = db.get_study(study_id)
-    mappings = db.get_mappings(study_id)
-    onto = db.get_ontology_mappings(study_id)
-    audit = db.get_audit_log(study_id)
+    study = await studies_repo.get_study(db, study_id)
+    mappings = await mappings_repo.get_mappings(db, study_id)
+    onto = await ontology_repo.get_ontology_mappings(db, study_id)
+    audit = await audit_repo.get_audit_log(db, study_id)
 
     report = {
         "study": study,

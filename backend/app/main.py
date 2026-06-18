@@ -17,7 +17,6 @@ from app.core.limits import install_limits
 from app.core.metrics import MetricsMiddleware
 from app.core.sentry import init_sentry
 from app.core.settings import settings
-from app.database import init_db
 from app.routers import admin, audit, auth, export, harmonize, health, mappings, ontology, quality, tokens, ws
 
 configure_logging(settings.log_level)
@@ -26,9 +25,8 @@ init_sentry()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialise database and pre-warm the ML engine on startup."""
-    init_db()
-
+    """Pre-warm the ML engine on startup. The database schema is managed by
+    Alembic migrations (run before boot), so there's no runtime DDL here."""
     # Pre-warm the selected engine in a background thread so the server
     # starts accepting requests immediately.  The engine loads the
     # SentenceTransformer model (~90 MB) and dictionaries once, and warms the

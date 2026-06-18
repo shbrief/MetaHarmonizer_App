@@ -11,10 +11,14 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from rapidfuzz import fuzz, process
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import database as db
 from app.core.deps import require_role
+from app.db.session import get_db
 from app.models import OntologyEditRequest, OntologyMappingOut, OntologySearchResult
+from app.repositories import audit as audit_repo
+from app.repositories import ontology as ontology_repo
+from app.repositories import studies as studies_repo
 from app.services.harmonizer import ONTOLOGY_MAP, _STATIC_NCIT, _load_field_value_dict
 
 router = APIRouter(prefix="/api/v1/ontology", tags=["ontology"])
@@ -102,12 +106,12 @@ async def search_ontology(
 
 
 @router.get("/mappings/{study_id}", response_model=list[OntologyMappingOut])
-async def get_ontology_mappings(study_id: str):
+async def get_ontology_mappings(study_id: str, db: AsyncSession = Depends(get_db)):
     """Get all ontology value mappings for a study."""
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
-    return db.get_ontology_mappings(study_id)
+    return await ontology_repo.get_ontology_mappings(db, study_id)
 
 
 def _best_index_match(value: str) -> tuple[dict, float] | None:
@@ -157,6 +161,7 @@ async def suggest_ontology_terms(
     study_id: str,
     threshold: float = Query(default=0.85, ge=0.0, le=1.0),
     _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     """Batch-suggest ontology terms for a study's *unmatched* values in ONE call.
 
@@ -165,11 +170,11 @@ async def suggest_ontology_terms(
     clears ``threshold``, return it keyed by mapping id. Computing this
     server-side avoids the client firing one HTTP request per value (which both
     hammers the rate limiter and is an N+1)."""
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    rows = db.get_ontology_mappings(study_id)
+    rows = await ontology_repo.get_ontology_mappings(db, study_id)
 
     # Distinct term-like raw values among unmatched rows → best index match once.
     distinct: dict[str, list[int]] = {}
@@ -204,40 +209,55 @@ async def suggest_ontology_terms(
 
 
 @router.post("/mappings/{mapping_id}/accept", response_model=OntologyMappingOut)
-async def accept_ontology_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
+async def accept_ontology_mapping(
+    mapping_id: int,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
     """Accept the automated ontology term assignment."""
-    result = db.update_ontology_mapping(mapping_id, status="accepted")
+    result = await ontology_repo.update_ontology_mapping(db, mapping_id, status="accepted")
     if not result:
         raise HTTPException(status_code=404, detail="Ontology mapping not found")
-    db.add_audit_entry(
+    await audit_repo.add_audit_entry(
+        db,
         study_id=result["study_id"],
         action="onto_accept",
         mapping_id=mapping_id,
         old_value="pending",
         new_value="accepted",
     )
+    await db.commit()
     return result
 
 
 @router.post("/mappings/{mapping_id}/reject", response_model=OntologyMappingOut)
-async def reject_ontology_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
+async def reject_ontology_mapping(
+    mapping_id: int,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
     """Reject the automated ontology term assignment."""
-    result = db.update_ontology_mapping(mapping_id, status="rejected")
+    result = await ontology_repo.update_ontology_mapping(db, mapping_id, status="rejected")
     if not result:
         raise HTTPException(status_code=404, detail="Ontology mapping not found")
-    db.add_audit_entry(
+    await audit_repo.add_audit_entry(
+        db,
         study_id=result["study_id"],
         action="onto_reject",
         mapping_id=mapping_id,
         old_value="pending",
         new_value="rejected",
     )
+    await db.commit()
     return result
 
 
 @router.patch("/mappings/{mapping_id}", response_model=OntologyMappingOut)
 async def edit_ontology_mapping(
-    mapping_id: int, body: OntologyEditRequest, _curator=Depends(require_role("curator"))
+    mapping_id: int,
+    body: OntologyEditRequest,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Curator manually overrides an ontology term assignment.
@@ -253,7 +273,8 @@ async def edit_ontology_mapping(
         if code:
             resolved_id = code if ":" in code else f"NCIT:{code}"
 
-    result = db.update_ontology_mapping(
+    result = await ontology_repo.update_ontology_mapping(
+        db,
         mapping_id,
         status="accepted",
         curator_term=body.new_term,
@@ -262,11 +283,13 @@ async def edit_ontology_mapping(
     if not result:
         raise HTTPException(status_code=404, detail="Ontology mapping not found")
 
-    db.add_audit_entry(
+    await audit_repo.add_audit_entry(
+        db,
         study_id=result["study_id"],
         action="onto_edit",
         mapping_id=mapping_id,
         old_value=result.get("ontology_term"),
         new_value=body.new_term,
     )
+    await db.commit()
     return result

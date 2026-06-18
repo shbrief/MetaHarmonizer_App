@@ -11,10 +11,13 @@ import csv
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import database as db
+from app.db.session import get_db
 from app.models import QualityMetrics
+from app.repositories import mappings as mappings_repo
+from app.repositories import studies as studies_repo
 from app.services.analytics import compute_quality_metrics
 
 router = APIRouter(prefix="/api/v1/quality", tags=["quality"])
@@ -81,12 +84,12 @@ def _find_eval_csv_for_study(study: dict) -> Optional[Path]:
 
 
 @router.get("/{study_id}", response_model=QualityMetrics)
-async def get_quality_metrics(study_id: str):
+async def get_quality_metrics(study_id: str, db: AsyncSession = Depends(get_db)):
     """Returns confidence distribution, stage breakdown, coverage stats."""
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
-    return compute_quality_metrics(study_id)
+    return await compute_quality_metrics(db, study_id)
 
 
 @router.post("/{study_id}/evaluate")
@@ -100,6 +103,7 @@ async def evaluate_mapping_accuracy(
         ),
         embed=True,
     ),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Compute precision, recall, and F1 for a study's schema mappings.
@@ -110,7 +114,7 @@ async def evaluate_mapping_accuracy(
 
     Returns per-column breakdown and aggregate TP/FP/FN/TN / P / R / F1.
     """
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
@@ -137,6 +141,6 @@ async def evaluate_mapping_accuracy(
             detail="ground_truth dict is empty — nothing to evaluate."
         )
 
-    result = db.compute_mapping_accuracy(study_id, ground_truth)
+    result = await mappings_repo.compute_mapping_accuracy(db, study_id, ground_truth)
     result["ground_truth_source"] = source
     return result

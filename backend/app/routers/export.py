@@ -9,10 +9,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import database as db
+from app.db.session import get_db
+from app.repositories import studies as studies_repo
 from app.services.exporter import (
     export_cbioportal,
     export_cbioportal_study,
@@ -23,9 +25,9 @@ from app.services.exporter import (
 router = APIRouter(prefix="/api/v1/export", tags=["export"])
 
 
-def _load_raw_df(study_id: str) -> pd.DataFrame:
+async def _load_raw_df(db: AsyncSession, study_id: str) -> pd.DataFrame:
     """Load the original uploaded CSV for a study."""
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
@@ -36,15 +38,16 @@ def _load_raw_df(study_id: str) -> pd.DataFrame:
     suffix = Path(path).suffix.lower()
     sep = "\t" if suffix in (".tsv", ".txt") else ","
     # An export counts as "preserve this study" — exempt it from the logout purge.
-    db.mark_study_exported(study_id)
+    await studies_repo.mark_exported(db, study_id)
     return pd.read_csv(path, sep=sep, low_memory=False)
 
 
 @router.get("/{study_id}/harmonized")
-async def export_harmonized(study_id: str):
+async def export_harmonized(study_id: str, db: AsyncSession = Depends(get_db)):
     """Export harmonized CSV with renamed columns."""
-    raw_df = _load_raw_df(study_id)
-    csv_text = export_harmonized_csv(study_id, raw_df)
+    raw_df = await _load_raw_df(db, study_id)
+    csv_text = await export_harmonized_csv(db, study_id, raw_df)
+    await db.commit()
     return PlainTextResponse(
         content=csv_text,
         media_type="text/csv",
@@ -53,10 +56,11 @@ async def export_harmonized(study_id: str):
 
 
 @router.get("/{study_id}/cbioportal")
-async def export_cbioportal_format(study_id: str):
+async def export_cbioportal_format(study_id: str, db: AsyncSession = Depends(get_db)):
     """Export in cBioPortal clinical data format (tab-separated with header lines)."""
-    raw_df = _load_raw_df(study_id)
-    tsv_text = export_cbioportal(study_id, raw_df)
+    raw_df = await _load_raw_df(db, study_id)
+    tsv_text = await export_cbioportal(db, study_id, raw_df)
+    await db.commit()
     return PlainTextResponse(
         content=tsv_text,
         media_type="text/tab-separated-values",
@@ -67,10 +71,11 @@ async def export_cbioportal_format(study_id: str):
 
 
 @router.get("/{study_id}/cbioportal-study")
-async def export_cbioportal_study_folder(study_id: str):
+async def export_cbioportal_study_folder(study_id: str, db: AsyncSession = Depends(get_db)):
     """Export a validateData.py-ready cBioPortal study folder (zip with meta files)."""
-    raw_df = _load_raw_df(study_id)
-    zip_bytes = export_cbioportal_study(study_id, raw_df)
+    raw_df = await _load_raw_df(db, study_id)
+    zip_bytes = await export_cbioportal_study(db, study_id, raw_df)
+    await db.commit()
     return Response(
         content=zip_bytes,
         media_type="application/zip",
@@ -81,14 +86,15 @@ async def export_cbioportal_study_folder(study_id: str):
 
 
 @router.get("/{study_id}/report")
-async def export_report(study_id: str):
+async def export_report(study_id: str, db: AsyncSession = Depends(get_db)):
     """Export full JSON mapping report / audit trail."""
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    db.mark_study_exported(study_id)
-    report = export_mapping_report(study_id)
+    await studies_repo.mark_exported(db, study_id)
+    report = await export_mapping_report(db, study_id)
+    await db.commit()
     return PlainTextResponse(
         content=report,
         media_type="application/json",

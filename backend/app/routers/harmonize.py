@@ -15,7 +15,6 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import database as db
 from app.core.deps import current_user, require_role
 from app.core.queue import enqueue_harmonize
 from app.core.settings import settings
@@ -23,6 +22,8 @@ from app.core.uploads import check_upload_size
 from app.db.session import get_db
 from app.models import HarmonizeAccepted, OverviewResponse, StudyOut
 from app.repositories import jobs as jobs_repo
+from app.repositories import mappings as mappings_repo
+from app.repositories import studies as studies_repo
 from app.services.analytics import compute_overview
 from app.services.harmonizer import generate_study_id
 
@@ -94,7 +95,8 @@ async def harmonize_study(
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}")
 
     study_name = Path(file.filename).stem
-    db.create_study(
+    await studies_repo.create_study(
+        db_session,
         study_id=study_id,
         name=study_name,
         file_path=str(save_path),
@@ -102,7 +104,7 @@ async def harmonize_study(
         column_count=len(shape_df.columns),
         owner_id=getattr(user, "id", None),
     )
-    db.update_study_status(study_id, "queued")
+    await studies_repo.update_status(db_session, study_id, "queued")
 
     # Record the job and enqueue it (inline thread in dev, arq workers in prod).
     job = await jobs_repo.create_job(db_session, study_id=study_id, kind="harmonize")
@@ -130,13 +132,13 @@ async def harmonize_study(
 
 
 @router.get("/harmonize/{job_id}")
-async def get_harmonization_results(job_id: str):
+async def get_harmonization_results(job_id: str, db: AsyncSession = Depends(get_db)):
     """Get the schema mapping results for a harmonization job."""
-    study = db.get_study(job_id)
+    study = await studies_repo.get_study(db, job_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    mappings = db.get_mappings(job_id)
+    mappings = await mappings_repo.get_mappings(db, job_id)
     return {
         "study": study,
         "mappings": mappings,
@@ -145,25 +147,25 @@ async def get_harmonization_results(job_id: str):
 
 
 @router.get("/studies", response_model=list[StudyOut])
-async def list_studies(user=Depends(current_user)):
+async def list_studies(user=Depends(current_user), db: AsyncSession = Depends(get_db)):
     """List studies visible to the caller: a curator sees only their own
     uploads; an admin sees everything."""
     owner = None if getattr(user, "role", None) == "admin" else getattr(user, "id", None)
-    return db.list_studies(owner_id=owner)
+    return await studies_repo.list_studies(db, owner_id=owner)
 
 
 @router.get("/overview", response_model=OverviewResponse)
-async def get_overview(user=Depends(current_user)):
+async def get_overview(user=Depends(current_user), db: AsyncSession = Depends(get_db)):
     """Portfolio-wide harmonization summary for the home dashboard, scoped to
     the caller's own studies (admins see the whole portfolio)."""
     owner = None if getattr(user, "role", None) == "admin" else getattr(user, "id", None)
-    return compute_overview(owner_id=owner)
+    return await compute_overview(db, owner_id=owner)
 
 
 @router.get("/studies/{study_id}", response_model=StudyOut)
-async def get_study(study_id: str):
+async def get_study(study_id: str, db: AsyncSession = Depends(get_db)):
     """Get study details."""
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
     return study

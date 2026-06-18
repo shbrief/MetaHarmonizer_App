@@ -10,117 +10,145 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import database as db
 from app.core.deps import require_role
+from app.db.session import get_db
 from app.models import (
     BatchUpdateRequest,
     BatchUpdateResponse,
     MappingEditRequest,
     MappingOut,
 )
+from app.repositories import audit as audit_repo
+from app.repositories import mappings as mappings_repo
+from app.repositories import studies as studies_repo
 
 router = APIRouter(prefix="/api/v1/mappings", tags=["mappings"])
 
 
 @router.get("/{study_id}", response_model=list[MappingOut])
-async def get_study_mappings(study_id: str):
+async def get_study_mappings(study_id: str, db: AsyncSession = Depends(get_db)):
     """Get all mappings for a study."""
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
-    mappings = db.get_mappings(study_id)
+    mappings = await mappings_repo.get_mappings(db, study_id)
     return mappings
 
 
 @router.post("/{mapping_id}/accept", response_model=MappingOut)
-async def accept_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
+async def accept_mapping(
+    mapping_id: int,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
     """Accept an automated mapping."""
-    mapping = db.get_mapping(mapping_id)
+    mapping = await mappings_repo.get_mapping(db, mapping_id)
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     old_status = mapping["status"]
-    result = db.update_mapping_status(mapping_id, "accepted")
+    result = await mappings_repo.update_mapping_status(db, mapping_id, "accepted")
 
-    db.add_audit_entry(
+    await audit_repo.add_audit_entry(
+        db,
         study_id=mapping["study_id"],
         action="accept",
         mapping_id=mapping_id,
         old_value=old_status,
         new_value="accepted",
     )
+    await db.commit()
     return result
 
 
 @router.post("/{mapping_id}/reject", response_model=MappingOut)
-async def reject_mapping(mapping_id: int, _curator=Depends(require_role("curator"))):
+async def reject_mapping(
+    mapping_id: int,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
     """Reject an automated mapping."""
-    mapping = db.get_mapping(mapping_id)
+    mapping = await mappings_repo.get_mapping(db, mapping_id)
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     old_status = mapping["status"]
-    result = db.update_mapping_status(mapping_id, "rejected")
+    result = await mappings_repo.update_mapping_status(db, mapping_id, "rejected")
 
-    db.add_audit_entry(
+    await audit_repo.add_audit_entry(
+        db,
         study_id=mapping["study_id"],
         action="reject",
         mapping_id=mapping_id,
         old_value=old_status,
         new_value="rejected",
     )
+    await db.commit()
     return result
 
 
 @router.post("/{mapping_id}/edit", response_model=MappingOut)
 async def edit_mapping(
-    mapping_id: int, body: MappingEditRequest, _curator=Depends(require_role("curator"))
+    mapping_id: int,
+    body: MappingEditRequest,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
 ):
     """Curator manually edits a mapping to a different field."""
-    mapping = db.get_mapping(mapping_id)
+    mapping = await mappings_repo.get_mapping(db, mapping_id)
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     old_field = mapping.get("matched_field")
-    result = db.update_mapping_status(
+    result = await mappings_repo.update_mapping_status(
+        db,
         mapping_id,
         status="accepted",
         curator_field=body.new_field,
         curator_note=body.note,
     )
 
-    db.add_audit_entry(
+    await audit_repo.add_audit_entry(
+        db,
         study_id=mapping["study_id"],
         action="edit",
         mapping_id=mapping_id,
         old_value=old_field,
         new_value=body.new_field,
     )
+    await db.commit()
     return result
 
 
 @router.post("/batch", response_model=BatchUpdateResponse)
 async def batch_update_mappings(
-    body: BatchUpdateRequest, _curator=Depends(require_role("curator"))
+    body: BatchUpdateRequest,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
 ):
     """Batch accept or reject multiple mappings."""
     if not body.mapping_ids:
         raise HTTPException(status_code=400, detail="No mapping IDs provided")
 
-    updated = db.batch_update_mapping_status(body.mapping_ids, body.action)
+    updated = await mappings_repo.batch_update_mapping_status(
+        db, body.mapping_ids, body.action
+    )
 
     # Audit log for batch
     if body.mapping_ids:
-        first = db.get_mapping(body.mapping_ids[0])
+        first = await mappings_repo.get_mapping(db, body.mapping_ids[0])
         if first:
-            db.add_audit_entry(
+            await audit_repo.add_audit_entry(
+                db,
                 study_id=first["study_id"],
                 action=f"batch_{body.action}",
                 old_value=f"{len(body.mapping_ids)} mappings",
                 new_value=body.action,
             )
 
+    await db.commit()
     return BatchUpdateResponse(updated=updated, action=body.action)
 
 
@@ -129,18 +157,22 @@ async def batch_update_mappings(
 # ---------------------------------------------------------------------------
 
 @router.post("/{mapping_id}/llm")
-async def llm_rematch(mapping_id: int, _curator=Depends(require_role("curator"))):
+async def llm_rematch(
+    mapping_id: int,
+    _curator=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Re-run Stage 4 (LLM / Gemini) for a single mapping on demand.
 
     Requires GEMINI_API_KEY to be set in the backend environment.
     Returns a list of suggested field matches without automatically accepting them.
     """
-    mapping = db.get_mapping(mapping_id)
+    mapping = await mappings_repo.get_mapping(db, mapping_id)
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
 
-    study = db.get_study(mapping["study_id"])
+    study = await studies_repo.get_study(db, mapping["study_id"])
     if not study or not study.get("file_path"):
         raise HTTPException(status_code=404, detail="Study CSV not found")
 
@@ -155,13 +187,15 @@ async def llm_rematch(mapping_id: int, _curator=Depends(require_role("curator"))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    db.add_audit_entry(
+    await audit_repo.add_audit_entry(
+        db,
         study_id=mapping["study_id"],
         action="llm_rematch",
         mapping_id=mapping_id,
         old_value=mapping.get("matched_field"),
         new_value=suggestions[0]["field"] if suggestions else None,
     )
+    await db.commit()
 
     return {
         "mapping_id": mapping_id,
@@ -175,7 +209,11 @@ async def llm_rematch(mapping_id: int, _curator=Depends(require_role("curator"))
 # ---------------------------------------------------------------------------
 
 @router.get("/{study_id}/suggestions")
-async def get_field_suggestions(study_id: str, confidence_threshold: float = 0.5):
+async def get_field_suggestions(
+    study_id: str,
+    confidence_threshold: float = 0.5,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Return columns that are unmapped or below the confidence threshold,
     together with the engine's ranked alternative suggestions.
@@ -183,11 +221,11 @@ async def get_field_suggestions(study_id: str, confidence_threshold: float = 0.5
     Use these as curator "work items" — the alternatives come from the
     `alternatives` JSON column written by the schema mapping pipeline.
     """
-    study = db.get_study(study_id)
+    study = await studies_repo.get_study(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    all_mappings = db.get_mappings(study_id)
+    all_mappings = await mappings_repo.get_mappings(db, study_id)
     suggestions = []
 
     for m in all_mappings:

@@ -7,7 +7,8 @@ from mapping data stored in the database.
 
 from __future__ import annotations
 
-from app import database as db
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models import (
     ConfidenceBucket,
     OverviewResponse,
@@ -15,11 +16,13 @@ from app.models import (
     StageBreakdown,
     StudySummary,
 )
+from app.repositories import mappings as mappings_repo
+from app.repositories import studies as studies_repo
 
 
-def compute_quality_metrics(study_id: str) -> QualityMetrics:
+async def compute_quality_metrics(db: AsyncSession, study_id: str) -> QualityMetrics:
     """Build a complete quality report for a given study."""
-    mappings = db.get_mappings(study_id)
+    mappings = await mappings_repo.get_mappings(db, study_id)
 
     total = len(mappings)
     if total == 0:
@@ -96,10 +99,12 @@ def compute_quality_metrics(study_id: str) -> QualityMetrics:
     )
 
 
-def compute_overview(owner_id: int | None = None) -> OverviewResponse:
+async def compute_overview(
+    db: AsyncSession, owner_id: int | None = None
+) -> OverviewResponse:
     """Aggregate harmonization status across studies for the home dashboard.
     Scoped to ``owner_id`` when given (per-user view); ``None`` = all studies."""
-    studies = db.list_studies(owner_id=owner_id)
+    studies = await studies_repo.list_studies(db, owner_id=owner_id)
 
     total_columns = 0
     total_rows = 0
@@ -113,7 +118,7 @@ def compute_overview(owner_id: int | None = None) -> OverviewResponse:
     summaries: list[StudySummary] = []
 
     for study in studies:
-        mappings = db.get_mappings(study["id"])
+        mappings = await mappings_repo.get_mappings(db, study["id"])
         col_total = len(mappings)
         s_mapped = sum(1 for m in mappings if m["matched_field"] is not None)
         s_pending = sum(1 for m in mappings if m["status"] == "pending")

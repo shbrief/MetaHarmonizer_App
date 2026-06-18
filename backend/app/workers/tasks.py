@@ -19,7 +19,6 @@ import logging
 import anyio
 import pandas as pd
 
-from app import database as db
 from app.core.jobs import (
     JobCancelled,
     clear_cancel,
@@ -30,6 +29,9 @@ from app.core.jobs import (
 from app.db.session import SessionLocal
 from app.engine_adapter import get_engine
 from app.repositories import jobs as jobs_repo
+from app.repositories import mappings as mappings_repo
+from app.repositories import ontology as ontology_repo
+from app.repositories import studies as studies_repo
 
 logger = logging.getLogger("app.jobs")
 
@@ -55,24 +57,32 @@ async def _checkpoint(study_id: str) -> None:
         raise JobCancelled()
 
 
+async def _set_status(study_id: str, status: str) -> None:
+    """Persist a study status change in its own short-lived transaction."""
+    async with SessionLocal() as session:
+        await studies_repo.update_status(session, study_id, status)
+        await session.commit()
+
+
 def _run_pipeline(study_id: str, file_path: str, suffix: str, curated_path: str) -> dict:
-    """Synchronous, CPU-heavy engine work — executed in a worker thread."""
+    """Synchronous, CPU-heavy engine work — executed in a worker thread.
+
+    Returns the raw engine results; persistence happens back on the event loop
+    via async repositories (a worker thread can't use the async session)."""
     sep = "\t" if suffix in (".tsv", ".txt") else ","
     raw_df = pd.read_csv(file_path, sep=sep, low_memory=False)
     curated_df = pd.read_csv(curated_path, low_memory=False)
 
     engine = get_engine()
     schema_results = engine.harmonize_schema(raw_df, curated_df, csv_path=file_path)
-    db.insert_mappings(study_id, schema_results)
-
-    onto_results = engine.map_values(raw_df, schema_results)
-    if onto_results:
-        db.insert_ontology_mappings(study_id, onto_results)
+    onto_results = engine.map_values(raw_df, schema_results) or []
 
     return {
+        "schema_results": schema_results,
+        "onto_results": onto_results,
         "columns": len(schema_results),
         "rows": int(len(raw_df)),
-        "ontology_values": len(onto_results) if onto_results else 0,
+        "ontology_values": len(onto_results),
     }
 
 
@@ -99,7 +109,7 @@ async def run_harmonize(
         await _checkpoint(study_id)
         await _emit(study_id, stage="parse", message="Reading file", pct=10)
 
-        db.update_study_status(study_id, "processing")
+        await _set_status(study_id, "processing")
         await _emit(study_id, stage="schema", message="Mapping columns to schema", pct=30)
 
         # Heavy engine work off the event loop; re-check cancel before & after.
@@ -109,8 +119,19 @@ async def run_harmonize(
         )
         await _checkpoint(study_id)
 
+        # Persist engine output on the event loop via async repositories.
+        schema_results = result.pop("schema_results")
+        onto_results = result.pop("onto_results")
+        async with SessionLocal() as session:
+            await mappings_repo.insert_mappings(session, study_id, schema_results)
+            if onto_results:
+                await ontology_repo.insert_ontology_mappings(
+                    session, study_id, onto_results
+                )
+            await session.commit()
+
         await _emit(study_id, stage="ontology", message="Resolving ontology terms", pct=90)
-        db.update_study_status(study_id, "review")
+        await _set_status(study_id, "review")
 
         async with SessionLocal() as session:
             job = await jobs_repo.get_job(session, job_id)
@@ -137,7 +158,7 @@ async def run_harmonize(
             )
 
     except JobCancelled:
-        db.update_study_status(study_id, "cancelled")
+        await _set_status(study_id, "cancelled")
         async with SessionLocal() as session:
             job = await jobs_repo.get_job(session, job_id)
             if job:
@@ -152,7 +173,7 @@ async def run_harmonize(
 
     except Exception as exc:  # noqa: BLE001 — terminal failure is recorded, not raised
         logger.exception("harmonize job %s failed", job_id)
-        db.update_study_status(study_id, "failed")
+        await _set_status(study_id, "failed")
         async with SessionLocal() as session:
             job = await jobs_repo.get_job(session, job_id)
             if job:
