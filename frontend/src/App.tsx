@@ -23,7 +23,7 @@ const AdminPage = lazy(() => import('./pages/AdminPage'));
 const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/upload', icon: Upload, label: 'Upload', end: false },
-  { to: '/review', icon: Table2, label: 'Mapping Review', end: false },
+  { to: '/review', icon: Table2, label: 'Mappings', end: false },
   { to: '/ontology', icon: Microscope, label: 'Ontology', end: false },
   { to: '/quality', icon: BarChart3, label: 'Quality', end: false },
   { to: '/export', icon: Download, label: 'Export', end: false },
@@ -43,14 +43,14 @@ function TopNav() {
               to={to}
               end={end}
               className={({ isActive }) =>
-                `flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                `flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-medium transition ${
                   isActive
                     ? 'bg-primary-50 text-primary-700'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`
               }
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-4 w-4 shrink-0" />
               {label}
             </NavLink>
           ))}
@@ -58,14 +58,14 @@ function TopNav() {
             <NavLink
               to="/admin"
               className={({ isActive }) =>
-                `flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                `flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-medium transition ${
                   isActive
                     ? 'bg-primary-50 text-primary-700'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`
               }
             >
-              <Shield className="h-4 w-4" />
+              <Shield className="h-4 w-4 shrink-0" />
               Admin
             </NavLink>
           )}
@@ -82,12 +82,12 @@ function TopNav() {
             to={to}
             end={end}
             className={({ isActive }) =>
-              `flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+              `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
                 isActive ? 'bg-primary-50 text-primary-700' : 'text-slate-600'
               }`
             }
           >
-            <Icon className="h-3.5 w-3.5" />
+            <Icon className="h-3.5 w-3.5 shrink-0" />
             {label}
           </NavLink>
         ))}
