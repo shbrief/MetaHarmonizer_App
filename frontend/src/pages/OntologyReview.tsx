@@ -12,6 +12,7 @@ import {
   CircleCheck,
   Clock,
   HelpCircle,
+  Plus,
 } from 'lucide-react';
 import {
   acceptOntologyMapping,
@@ -29,7 +30,7 @@ import StudyGate, { isStudyReady } from '../components/StudyGate';
 import { Card, CardBody } from '../components/ui/Card';
 import type { OntologyMapping, OntologySearchResult } from '../api/types';
 
-interface EditState { id: number; term: string; ontId: string }
+interface EditState { id: number; term: string; ontId: string; raw?: string }
 type StatusFilter = 'all' | 'pending' | 'accepted' | 'rejected';
 
 const hasTerm = (m: OntologyMapping) => !!(m.curator_term ?? m.ontology_term);
@@ -162,6 +163,11 @@ export default function OntologyReview() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditState(null)}>
           <div className="w-full max-w-lg space-y-4 rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-slate-800">Set ontology term</h3>
+            {editState.raw && (
+              <p className="text-xs text-slate-500">
+                Assigning a term to <code className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-700">{editState.raw}</code>
+              </p>
+            )}
             <div className="space-y-2">
               <label className="text-xs text-slate-500">Term name</label>
               <input
@@ -325,7 +331,7 @@ export default function OntologyReview() {
                                     )}
                                     <button
                                       title="Edit term"
-                                      onClick={() => setEditState({ id: om.id, term: term ?? '', ontId: oid ?? '' })}
+                                      onClick={() => setEditState({ id: om.id, term: term ?? '', ontId: oid ?? '', raw: om.raw_value })}
                                       className="rounded p-1 text-blue-500 hover:bg-blue-50"
                                     >
                                       <Pencil className="h-3.5 w-3.5" />
@@ -360,8 +366,9 @@ export default function OntologyReview() {
               {showUnmatched && (
                 <CardBody className="space-y-3 border-t border-slate-100 pt-4">
                   <p className="text-xs text-slate-500">
-                    These values don’t correspond to a controlled-vocabulary term (e.g. sample IDs,
-                    study names, free text). They’re listed for reference and don’t need review.
+                    These values didn’t match a controlled-vocabulary term (often sample IDs, study
+                    names, or free text). Most need no action — but if one should have a term, click
+                    it to assign one manually.
                   </p>
                   {Object.entries(groupedUnmatched).map(([field, items]) => (
                     <div key={field}>
@@ -370,9 +377,15 @@ export default function OntologyReview() {
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {items.slice(0, 40).map((m) => (
-                          <code key={m.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                          <button
+                            key={m.id}
+                            title="Assign an ontology term"
+                            onClick={() => setEditState({ id: m.id, term: '', ontId: '', raw: m.raw_value })}
+                            className="group inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-primary-50 hover:text-primary-700"
+                          >
                             {m.raw_value}
-                          </code>
+                            <Plus className="h-2.5 w-2.5 opacity-0 transition group-hover:opacity-100" />
+                          </button>
                         ))}
                         {items.length > 40 && (
                           <span className="px-1 py-0.5 text-[11px] text-slate-400">+{items.length - 40} more</span>

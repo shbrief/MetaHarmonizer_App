@@ -41,40 +41,70 @@ const STAGE_LABEL: Record<string, string> = {
 
 export default function ProcessingTray() {
     const { jobs, cancel, dismiss, activeCount } = useJobs();
-    const [collapsed, setCollapsed] = useState(false);
+    const [collapsed, setCollapsed] = useState(true);
+    const [hidden, setHidden] = useState(false);
     const navigate = useNavigate();
 
     if (jobs.length === 0) return null;
 
+    // Hidden → show only a tiny launcher chip so the tray never covers content.
+    if (hidden) {
+        return (
+            <button
+                type="button"
+                onClick={() => setHidden(false)}
+                title="Show harmonization jobs"
+                className="fixed bottom-4 right-4 z-50 flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-lg shadow-slate-900/10 hover:bg-slate-50"
+            >
+                {activeCount > 0 ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                ) : (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                )}
+                {activeCount > 0 ? `${activeCount} processing` : 'Jobs'}
+            </button>
+        );
+    }
+
     return (
-        <div className="fixed bottom-4 right-4 z-50 w-[min(92vw,22rem)]">
+        <div className="fixed bottom-4 right-4 z-50 w-[min(90vw,20rem)]">
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10">
                 {/* Header */}
-                <button
-                    type="button"
-                    onClick={() => setCollapsed((c) => !c)}
-                    className="flex w-full items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-2.5 text-left"
-                >
-                    <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                        {activeCount > 0 ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                <div className="flex items-center gap-1 border-b border-slate-100 bg-slate-50/80 pr-1.5">
+                    <button
+                        type="button"
+                        onClick={() => setCollapsed((c) => !c)}
+                        className="flex flex-1 items-center justify-between gap-2 px-3 py-2 text-left"
+                    >
+                        <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                            {activeCount > 0 ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                            ) : (
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                            )}
+                            {activeCount > 0
+                                ? `Processing ${activeCount} ${activeCount === 1 ? 'study' : 'studies'}`
+                                : 'Harmonization jobs'}
+                        </span>
+                        {collapsed ? (
+                            <ChevronUp className="h-4 w-4 text-slate-400" />
                         ) : (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                            <ChevronDown className="h-4 w-4 text-slate-400" />
                         )}
-                        {activeCount > 0
-                            ? `Processing ${activeCount} ${activeCount === 1 ? 'study' : 'studies'}`
-                            : 'Harmonization jobs'}
-                    </span>
-                    {collapsed ? (
-                        <ChevronUp className="h-4 w-4 text-slate-400" />
-                    ) : (
-                        <ChevronDown className="h-4 w-4 text-slate-400" />
-                    )}
-                </button>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setHidden(true)}
+                        title="Hide"
+                        className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
 
                 {/* Body */}
                 {!collapsed && (
-                    <ul className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto">
+                    <ul className="max-h-[55vh] divide-y divide-slate-100 overflow-y-auto">
                         {jobs.map((job) => (
                             <JobRow
                                 key={job.studyId}
