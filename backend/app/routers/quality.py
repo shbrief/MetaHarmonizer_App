@@ -8,7 +8,6 @@ Also provides a precision/recall evaluation endpoint against ground-truth CSVs.
 from __future__ import annotations
 
 import csv
-import os
 from pathlib import Path
 from typing import Optional
 

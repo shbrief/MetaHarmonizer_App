@@ -46,7 +46,7 @@ def _build_search_index() -> list[dict]:
             prefix = "NCIT"
         index.append({
             "term": term,
-            "ontology_id": ont_id or f"NCIT:unknown",
+            "ontology_id": ont_id or "NCIT:unknown",
             "ontology": prefix,
             "search_key": f"{term} {raw}".lower(),
         })

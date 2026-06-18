@@ -96,25 +96,35 @@ def init_db() -> None:
     conn.commit()
 
     # --- Incremental migrations (safe to run on existing DBs) ---
-    existing_onto_cols = {
-        row[1]
-        for row in cur.execute("PRAGMA table_info(ontology_mappings)").fetchall()
-    }
-    for col in ("curator_term", "curator_id", "reviewed_at", "reviewed_by"):
-        if col not in existing_onto_cols:
-            cur.execute(f"ALTER TABLE ontology_mappings ADD COLUMN {col} TEXT")
-
+    _ensure_columns(
+        cur,
+        "ontology_mappings",
+        {
+            "curator_term": "TEXT",
+            "curator_id": "TEXT",
+            "reviewed_at": "TEXT",
+            "reviewed_by": "TEXT",
+        },
+    )
     # Per-user ownership + export flag on studies (Sprint 3 follow-up). owner_id
     # links to the Postgres user id; exported guards a study from logout purge.
-    existing_study_cols = {
-        row[1] for row in cur.execute("PRAGMA table_info(studies)").fetchall()
-    }
-    if "owner_id" not in existing_study_cols:
-        cur.execute("ALTER TABLE studies ADD COLUMN owner_id INTEGER")
-    if "exported" not in existing_study_cols:
-        cur.execute("ALTER TABLE studies ADD COLUMN exported INTEGER NOT NULL DEFAULT 0")
+    _ensure_columns(
+        cur,
+        "studies",
+        {"owner_id": "INTEGER", "exported": "INTEGER NOT NULL DEFAULT 0"},
+    )
     conn.commit()
     conn.close()
+
+
+def _ensure_columns(cur, table: str, columns: dict[str, str]) -> None:
+    """Idempotently add any missing columns to ``table`` (simple SQLite migration
+    helper). ``columns`` maps column name → SQL type/clause. Table and column
+    names are code-controlled constants, never user input."""
+    existing = {row[1] for row in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, decl in columns.items():
+        if name not in existing:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 # ---------------------------------------------------------------------------
@@ -376,13 +386,16 @@ def update_ontology_mapping(
     """Curator override for an ontology value mapping."""
     conn = get_connection()
     # Migrate columns if they don't exist yet (supports pre-existing DBs)
-    existing_cols = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(ontology_mappings)").fetchall()
-    }
-    for col in ("curator_term", "curator_id", "reviewed_at", "reviewed_by"):
-        if col not in existing_cols:
-            conn.execute(f"ALTER TABLE ontology_mappings ADD COLUMN {col} TEXT")
+    _ensure_columns(
+        conn,
+        "ontology_mappings",
+        {
+            "curator_term": "TEXT",
+            "curator_id": "TEXT",
+            "reviewed_at": "TEXT",
+            "reviewed_by": "TEXT",
+        },
+    )
     conn.commit()
 
     now = datetime.now(timezone.utc).isoformat()

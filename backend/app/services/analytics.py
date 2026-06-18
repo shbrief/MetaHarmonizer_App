@@ -20,7 +20,6 @@ from app.models import (
 def compute_quality_metrics(study_id: str) -> QualityMetrics:
     """Build a complete quality report for a given study."""
     mappings = db.get_mappings(study_id)
-    study = db.get_study(study_id)
 
     total = len(mappings)
     if total == 0:

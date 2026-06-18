@@ -24,19 +24,6 @@ class StudyOut(BaseModel):
     column_count: Optional[int] = None
 
 
-class StudySummary(BaseModel):
-    id: str
-    name: str
-    status: str
-    upload_date: str
-    row_count: Optional[int] = None
-    column_count: Optional[int] = None
-    total_mappings: int = 0
-    accepted_count: int = 0
-    pending_count: int = 0
-    rejected_count: int = 0
-
-
 # ---------------------------------------------------------------------------
 # Mapping
 # ---------------------------------------------------------------------------

@@ -404,7 +404,7 @@ export default function MappingReview() {
                             {m.alternatives.length > 0 ? (
                               <ul className="space-y-1">
                                 {m.alternatives.map((alt, i) => (
-                                  <li key={i} className="flex items-center gap-2">
+                                  <li key={`${alt.field}-${i}`} className="flex items-center gap-2">
                                     <span className="font-mono text-primary-700">
                                       {alt.field}
                                     </span>

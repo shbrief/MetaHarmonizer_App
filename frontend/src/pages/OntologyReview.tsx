@@ -396,7 +396,7 @@ export default function OntologyReview() {
                 <ul className="mt-3 max-h-56 space-y-2 overflow-y-auto">
                   {searchResults.map((r, i) => (
                     <li
-                      key={i}
+                      key={`${r.ontology_id}-${i}`}
                       onClick={() => setEditState({ ...editState, term: r.term, ontId: r.ontology_id })}
                       className="cursor-pointer rounded-lg border border-slate-100 bg-white p-2 text-xs hover:border-primary-300 hover:bg-primary-50"
                     >
