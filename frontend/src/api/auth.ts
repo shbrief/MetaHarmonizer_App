@@ -40,19 +40,37 @@ export async function login(input: { email: string; password: string }): Promise
     return res;
 }
 
-/** Attempt to restore a session from the refresh cookie (called on app boot). */
+/**
+ * Attempt to restore a session from the refresh cookie (called on app boot).
+ *
+ * Single-flighted: refresh tokens are rotated server-side (each call revokes
+ * the presented token and issues a new one), so two concurrent calls would
+ * race — the second would send the now-revoked cookie and fail, signing the
+ * user out. React 18 StrictMode double-invokes mount effects in dev, which
+ * triggers exactly that. Sharing one in-flight promise guarantees a single
+ * /auth/refresh per boot regardless of how many callers ask.
+ */
+let bootstrapInFlight: Promise<User | null> | null = null;
+
 export async function bootstrapSession(): Promise<User | null> {
-    try {
-        const res = await apiFetch<TokenResponse>('/auth/refresh', {
-            method: 'POST',
-            skipAuthRetry: true,
-        });
-        setAccessToken(res.access_token);
-        return res.user;
-    } catch {
-        setAccessToken(null);
-        return null;
-    }
+    if (bootstrapInFlight) return bootstrapInFlight;
+    bootstrapInFlight = (async () => {
+        try {
+            const res = await apiFetch<TokenResponse>('/auth/refresh', {
+                method: 'POST',
+                skipAuthRetry: true,
+            });
+            setAccessToken(res.access_token);
+            return res.user;
+        } catch {
+            setAccessToken(null);
+            return null;
+        } finally {
+            // Allow a later, deliberate re-bootstrap (e.g. after logout) to run.
+            bootstrapInFlight = null;
+        }
+    })();
+    return bootstrapInFlight;
 }
 
 export async function getMe(): Promise<User> {
