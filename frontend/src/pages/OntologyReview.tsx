@@ -51,6 +51,8 @@ export default function OntologyReview() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showUnmatched, setShowUnmatched] = useState(false);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
+  // Per-field "show all unmatched values" toggle.
+  const [expandedFields, setExpandedFields] = useState<Record<string, boolean>>({});
 
   // Search (lives inside the edit modal)
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,14 +96,46 @@ export default function OntologyReview() {
 
   const handleEditSave = async () => {
     if (!editState || !editState.term.trim()) return;
-    setBusy((b) => ({ ...b, [editState.id]: true }));
+    const term = editState.term.trim();
+    const ontId = editState.ontId.trim();
+    // Apply the curator's term to every row that shares this value within the
+    // same field — both already-matched and unmatched occurrences — so a manual
+    // assignment fixes all of them at once (consistent with the suggestions
+    // panel) and the value won't linger in the unmatched list.
+    const targetRow = ontoMappings.find((m) => m.id === editState.id);
+    const key = targetRow?.raw_value.trim().toLowerCase();
+    const ids = targetRow
+      ? ontoMappings
+          .filter((m) => m.raw_value.trim().toLowerCase() === key && m.field_name === targetRow.field_name)
+          .map((m) => m.id)
+      : [editState.id];
+    setBusy((b) => {
+      const nb = { ...b };
+      ids.forEach((id) => (nb[id] = true));
+      return nb;
+    });
     try {
-      patch(await editOntologyMapping(editState.id, editState.term.trim(), editState.ontId.trim()));
+      const updated = await Promise.all(ids.map((id) => editOntologyMapping(id, term, ontId)));
+      updated.forEach(patch);
+      // Clear any suggestion entries for these rows.
+      setSuggestions((prev) => {
+        const rest = { ...prev };
+        ids.forEach((id) => delete rest[id]);
+        return rest;
+      });
+      toast.success(`Applied ${term}${ids.length > 1 ? ` to ${ids.length} values` : ''}`);
       setEditState(null);
       setSearchResults([]);
       setSearchQuery('');
-    } catch { /* ignore */ }
-    finally { setBusy((b) => ({ ...b, [editState!.id]: false })); }
+    } catch {
+      toast.error('Could not save the term.');
+    } finally {
+      setBusy((b) => {
+        const nb = { ...b };
+        ids.forEach((id) => (nb[id] = false));
+        return nb;
+      });
+    }
   };
 
   const handleSearch = async (q?: string) => {
@@ -239,10 +273,22 @@ export default function OntologyReview() {
     return g;
   }, [matched, statusFilter]);
 
-  // Unmatched grouped by field (for the collapsed explainer).
+  // Unmatched grouped by field, de-duplicated by value (so a value repeated
+  // across many rows shows once, with an occurrence count). Sorted by frequency.
   const groupedUnmatched = useMemo(() => {
-    const g: Record<string, OntologyMapping[]> = {};
-    for (const m of unmatched) (g[m.field_name] ??= []).push(m);
+    const g: Record<string, { row: OntologyMapping; count: number }[]> = {};
+    const idx: Record<string, Map<string, { row: OntologyMapping; count: number }>> = {};
+    for (const m of unmatched) {
+      const field = m.field_name;
+      const key = m.raw_value.trim().toLowerCase();
+      (idx[field] ??= new Map());
+      const existing = idx[field].get(key);
+      if (existing) existing.count += 1;
+      else idx[field].set(key, { row: m, count: 1 });
+    }
+    for (const [field, map] of Object.entries(idx)) {
+      g[field] = Array.from(map.values()).sort((a, b) => b.count - a.count);
+    }
     return g;
   }, [unmatched]);
 
@@ -584,31 +630,45 @@ export default function OntologyReview() {
                   <p className="text-xs text-slate-500">
                     These values didn’t match a controlled-vocabulary term (often sample IDs, study
                     names, or free text). Use <span className="font-medium text-slate-600">Find suggestions</span> to
-                    search the ontology automatically, or click any value to assign a term manually.
+                    search the ontology automatically, or click any value to assign a term manually
+                    (applies to every occurrence of that value).
                   </p>
-                  {Object.entries(groupedUnmatched).map(([field, items]) => (
-                    <div key={field}>
-                      <p className="mb-1 text-xs font-semibold text-slate-600">
-                        {field} <span className="font-normal text-slate-400">· {items.length}</span>
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {items.slice(0, 40).map((m) => (
-                          <button
-                            key={m.id}
-                            title="Assign an ontology term"
-                            onClick={() => setEditState({ id: m.id, term: '', ontId: '', raw: m.raw_value })}
-                            className="group inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-primary-50 hover:text-primary-700"
-                          >
-                            {m.raw_value}
-                            <Plus className="h-2.5 w-2.5 opacity-0 transition group-hover:opacity-100" />
-                          </button>
-                        ))}
-                        {items.length > 40 && (
-                          <span className="px-1 py-0.5 text-[11px] text-slate-400">+{items.length - 40} more</span>
-                        )}
+                  {Object.entries(groupedUnmatched).map(([field, items]) => {
+                    const expanded = !!expandedFields[field];
+                    const shown = expanded ? items : items.slice(0, 40);
+                    return (
+                      <div key={field}>
+                        <p className="mb-1 text-xs font-semibold text-slate-600">
+                          {field}{' '}
+                          <span className="font-normal text-slate-400">
+                            · {items.length} distinct value{items.length !== 1 ? 's' : ''}
+                          </span>
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {shown.map(({ row: m, count }) => (
+                            <button
+                              key={m.id}
+                              title={count > 1 ? `Assign a term to all ${count} occurrences` : 'Assign an ontology term'}
+                              onClick={() => setEditState({ id: m.id, term: '', ontId: '', raw: m.raw_value })}
+                              className="group inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-primary-50 hover:text-primary-700"
+                            >
+                              {m.raw_value}
+                              {count > 1 && <span className="text-slate-400">×{count}</span>}
+                              <Plus className="h-2.5 w-2.5 opacity-0 transition group-hover:opacity-100" />
+                            </button>
+                          ))}
+                          {items.length > 40 && (
+                            <button
+                              onClick={() => setExpandedFields((p) => ({ ...p, [field]: !expanded }))}
+                              className="px-1 py-0.5 text-[11px] font-medium text-primary-700 hover:text-primary-800"
+                            >
+                              {expanded ? 'Show fewer' : `View all ${items.length}`}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </CardBody>
               )}
             </Card>
