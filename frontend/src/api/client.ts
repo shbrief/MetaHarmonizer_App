@@ -117,6 +117,17 @@ export async function getOntologyMappings(
     return request<OntologyMapping[]>(`${BASE}/ontology/mappings/${studyId}`);
 }
 
+/** Batch-suggest ontology terms for a study's unmatched values in one request.
+ * Returns a map of mapping id → best candidate term/id/score. */
+export async function suggestOntologyTerms(
+    studyId: string,
+): Promise<Record<string, { term: string; ontology_id: string; score: number }>> {
+    const res = await request<{
+        suggestions: Record<string, { term: string; ontology_id: string; score: number }>;
+    }>(`${BASE}/ontology/suggest/${studyId}`, { method: 'POST' });
+    return res.suggestions ?? {};
+}
+
 export async function acceptOntologyMapping(id: number): Promise<OntologyMapping> {
     return request<OntologyMapping>(`${BASE}/ontology/mappings/${id}/accept`, { method: 'POST' });
 }

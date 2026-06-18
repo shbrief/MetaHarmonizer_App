@@ -13,13 +13,16 @@ import {
   Clock,
   HelpCircle,
   Plus,
+  Sparkles,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   acceptOntologyMapping,
   editOntologyMapping,
   getOntologyMappings,
   rejectOntologyMapping,
   searchOntology,
+  suggestOntologyTerms,
 } from '../api/client';
 import { useStudies } from '../hooks/queries';
 import ConfidenceBadge from '../components/ConfidenceBadge';
@@ -52,6 +55,13 @@ export default function OntologyReview() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<OntologySearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+
+  // Auto-suggestions for unmatched values (ontology-index lookup, batched).
+  // Keyed by mapping id → the best candidate term/id/score found.
+  const [suggestions, setSuggestions] = useState<
+    Record<number, { term: string; ontId: string; score: number }>
+  >({});
+  const [finding, setFinding] = useState(false);
 
   useEffect(() => {
     setSelectedId(studyId ?? null);
@@ -93,17 +103,37 @@ export default function OntologyReview() {
     finally { setBusy((b) => ({ ...b, [editState!.id]: false })); }
   };
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+  const handleSearch = async (q?: string) => {
+    const query = (q ?? searchQuery).trim();
+    if (!query) return;
     setSearching(true);
-    try { setSearchResults(await searchOntology(searchQuery)); }
+    try { setSearchResults(await searchOntology(query)); }
     catch { setSearchResults([]); }
     finally { setSearching(false); }
   };
 
+  // When the assign/edit modal opens for an unmatched value, auto-search the
+  // raw value so the curator immediately sees ontology candidates (the matcher
+  // is field-scoped, so a value can lack a match for its column yet still exist
+  // in another field — surfacing it here turns a manual lookup into one click).
+  useEffect(() => {
+    if (editState && !editState.term && editState.raw) {
+      setSearchQuery(editState.raw);
+      void handleSearch(editState.raw);
+    }
+    // Only re-run when a different mapping is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editState?.id]);
+
   const handleStudyChange = (id: string) => {
     setSelectedId(id);
     navigate(`/ontology/${id}`, { replace: true });
+  };
+
+  const closeModal = () => {
+    setEditState(null);
+    setSearchResults([]);
+    setSearchQuery('');
   };
 
   // ── Split matched (has a candidate ontology term — actionable) from
@@ -122,6 +152,52 @@ export default function OntologyReview() {
     unmatched: unmatched.length,
   }), [matched, unmatched]);
 
+  // Ask the backend to search the ontology index for every unmatched value
+  //  and return high-confidence candidates — a single request (the server does
+  //  the fuzzy matching), so no per-value HTTP fan-out / rate-limit storm.
+  const findSuggestions = async () => {
+    if (!selectedId) return;
+    setFinding(true);
+    try {
+      const raw = await suggestOntologyTerms(selectedId);
+      const next: Record<number, { term: string; ontId: string; score: number }> = {};
+      for (const [id, s] of Object.entries(raw)) {
+        next[Number(id)] = { term: s.term, ontId: s.ontology_id, score: s.score };
+      }
+      setSuggestions(next);
+      const n = Object.keys(next).length;
+      if (n === 0) toast('No confident ontology suggestions found.');
+      else {
+        setShowUnmatched(true);
+        toast.success(`Found ${n} suggested ${n === 1 ? 'match' : 'matches'} to review.`);
+      }
+    } catch {
+      toast.error('Could not fetch suggestions.');
+    } finally {
+      setFinding(false);
+    }
+  };
+
+  const applySuggestion = async (m: OntologyMapping) => {
+    const s = suggestions[m.id];
+    if (!s) return;
+    setBusy((b) => ({ ...b, [m.id]: true }));
+    try {
+      patch(await editOntologyMapping(m.id, s.term, s.ontId));
+      setSuggestions((prev) => {
+        const { [m.id]: _drop, ...rest } = prev;
+        return rest;
+      });
+    } catch { /* ignore */ }
+    finally { setBusy((b) => ({ ...b, [m.id]: false })); }
+  };
+
+  const dismissSuggestion = (id: number) =>
+    setSuggestions((prev) => {
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
+
   // Matched, filtered by status, grouped by field.
   const groupedMatched = useMemo(() => {
     const rows = statusFilter === 'all' ? matched : matched.filter((m) => m.status === statusFilter);
@@ -136,6 +212,12 @@ export default function OntologyReview() {
     for (const m of unmatched) (g[m.field_name] ??= []).push(m);
     return g;
   }, [unmatched]);
+
+  // Unmatched rows that picked up an ontology suggestion (shown for review).
+  const suggestedRows = useMemo(
+    () => unmatched.filter((m) => suggestions[m.id]),
+    [unmatched, suggestions],
+  );
 
   if (!selectedId) {
     return (
@@ -160,7 +242,7 @@ export default function OntologyReview() {
     <div className="space-y-6">
       {/* Edit Modal (with embedded search) */}
       {editState && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditState(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeModal}>
           <div className="w-full max-w-lg space-y-4 rounded-xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-slate-800">Set ontology term</h3>
             {editState.raw && (
@@ -191,6 +273,10 @@ export default function OntologyReview() {
 
             {/* Search panel */}
             <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+              <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                <Search className="h-3.5 w-3.5" />
+                Ontology suggestions
+              </div>
               <div className="flex gap-2">
                 <input
                   value={searchQuery}
@@ -199,10 +285,16 @@ export default function OntologyReview() {
                   placeholder="Search NCIT, UBERON…"
                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
-                <button onClick={handleSearch} disabled={searching} className="rounded-lg bg-primary-600 p-2 text-white hover:bg-primary-700">
+                <button onClick={() => handleSearch()} disabled={searching} className="rounded-lg bg-primary-600 p-2 text-white hover:bg-primary-700">
                   {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                 </button>
               </div>
+              {searching && searchResults.length === 0 && (
+                <p className="mt-2 text-xs text-slate-400">Searching…</p>
+              )}
+              {!searching && searchQuery && searchResults.length === 0 && (
+                <p className="mt-2 text-xs text-slate-400">No matches — type a different term above.</p>
+              )}
               {searchResults.length > 0 && (
                 <ul className="mt-3 max-h-56 space-y-2 overflow-y-auto">
                   {searchResults.map((r, i) => (
@@ -224,7 +316,7 @@ export default function OntologyReview() {
             </div>
 
             <div className="flex justify-end gap-2">
-              <button onClick={() => setEditState(null)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+              <button onClick={closeModal} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
                 Cancel
               </button>
               <button
@@ -353,22 +445,84 @@ export default function OntologyReview() {
           {/* Unmatched — collapsed explainer (free-text / identifiers) */}
           {stats.unmatched > 0 && (
             <Card>
-              <button
-                onClick={() => setShowUnmatched((s) => !s)}
-                className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-              >
-                <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                <button
+                  onClick={() => setShowUnmatched((s) => !s)}
+                  className="flex items-center gap-2 text-left text-sm font-medium text-slate-700"
+                >
                   {showUnmatched ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                   {stats.unmatched.toLocaleString()} values had no ontology match
-                </span>
-                <span className="hidden text-xs text-slate-400 sm:inline">free-text or identifiers — no action needed</span>
-              </button>
+                </button>
+                <button
+                  onClick={findSuggestions}
+                  disabled={finding}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
+                >
+                  {finding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {finding ? 'Searching ontology…' : 'Find suggestions'}
+                </button>
+              </div>
               {showUnmatched && (
-                <CardBody className="space-y-3 border-t border-slate-100 pt-4">
+                <CardBody className="space-y-4 border-t border-slate-100 pt-4">
+                  {/* Suggested matches found by the ontology search */}
+                  {suggestedRows.length > 0 && (
+                    <div className="space-y-2 rounded-xl border border-primary-100 bg-primary-50/40 p-3">
+                      <p className="flex items-center gap-1.5 text-xs font-semibold text-primary-800">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {suggestedRows.length} suggested {suggestedRows.length === 1 ? 'match' : 'matches'} — review &amp; apply
+                      </p>
+                      <ul className="space-y-1.5">
+                        {suggestedRows.map((m) => {
+                          const s = suggestions[m.id];
+                          const isBusy = !!busy[m.id];
+                          return (
+                            <li key={m.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-white px-3 py-2">
+                              <div className="flex min-w-0 flex-1 items-center gap-2">
+                                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{m.raw_value}</code>
+                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+                                <span className="truncate text-sm font-medium text-slate-900">{s.term}</span>
+                                <span className="truncate font-mono text-[11px] text-slate-400">{s.ontId}</span>
+                                <span className="text-[10px] text-slate-400">in {m.field_name}</span>
+                              </div>
+                              <ConfidenceBadge score={s.score} size="sm" />
+                              {isBusy ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    title="Apply this term"
+                                    onClick={() => applySuggestion(m)}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+                                  >
+                                    <Check className="h-3 w-3" /> Apply
+                                  </button>
+                                  <button
+                                    title="Edit before applying"
+                                    onClick={() => setEditState({ id: m.id, term: s.term, ontId: s.ontId, raw: m.raw_value })}
+                                    className="rounded p-1 text-blue-500 hover:bg-blue-50"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    title="Dismiss"
+                                    onClick={() => dismissSuggestion(m.id)}
+                                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
                   <p className="text-xs text-slate-500">
                     These values didn’t match a controlled-vocabulary term (often sample IDs, study
-                    names, or free text). Most need no action — but if one should have a term, click
-                    it to assign one manually.
+                    names, or free text). Use <span className="font-medium text-slate-600">Find suggestions</span> to
+                    search the ontology automatically, or click any value to assign a term manually.
                   </p>
                   {Object.entries(groupedUnmatched).map(([field, items]) => (
                     <div key={field}>

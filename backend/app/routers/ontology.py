@@ -7,6 +7,8 @@ Also returns ontology mappings for a study and allows curator overrides.
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from rapidfuzz import fuzz, process
 
@@ -106,6 +108,86 @@ async def get_ontology_mappings(study_id: str):
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
     return db.get_ontology_mappings(study_id)
+
+
+def _best_index_match(value: str) -> tuple[dict, float] | None:
+    """Return (index_entry, score 0..1) for the best ontology match of ``value``,
+    or None. Uses the same in-memory index + scorer as /search."""
+    q = value.lower().strip()
+    if not q or not _SEARCH_INDEX:
+        return None
+    keys = [c["search_key"] for c in _SEARCH_INDEX]
+    hit = process.extractOne(q, keys, scorer=fuzz.partial_ratio)
+    if not hit:
+        return None
+    _key, score, idx = hit
+    return _SEARCH_INDEX[idx], score / 100.0
+
+
+def _is_term_like(value: str) -> bool:
+    """Skip pure numbers, identifiers, and over-long free text so we only
+    suggest for values that plausibly map to a controlled-vocabulary term."""
+    v = value.strip()
+    if not (2 <= len(v) <= 40):
+        return False
+    if not re.search(r"[A-Za-z]", v):
+        return False
+    if re.fullmatch(r"\d+(\.\d+)?", v):
+        return False
+    if re.fullmatch(r"[A-Za-z]{1,4}\d{3,}", v):  # e.g. MG100208
+        return False
+    return True
+
+
+@router.post("/suggest/{study_id}")
+async def suggest_ontology_terms(
+    study_id: str,
+    threshold: float = Query(default=0.85, ge=0.0, le=1.0),
+    _curator=Depends(require_role("curator")),
+) -> dict[str, object]:
+    """Batch-suggest ontology terms for a study's *unmatched* values in ONE call.
+
+    For every distinct term-like raw value that the engine left without an
+    ontology term, search the in-memory ontology index and, when the best hit
+    clears ``threshold``, return it keyed by mapping id. Computing this
+    server-side avoids the client firing one HTTP request per value (which both
+    hammers the rate limiter and is an N+1)."""
+    study = db.get_study(study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    rows = db.get_ontology_mappings(study_id)
+
+    # Distinct term-like raw values among unmatched rows → best index match once.
+    distinct: dict[str, list[int]] = {}
+    for r in rows:
+        term = r.get("curator_term") or r.get("ontology_term")
+        if term:
+            continue  # already matched
+        raw = str(r.get("raw_value", ""))
+        if not _is_term_like(raw):
+            continue
+        distinct.setdefault(raw.lower().strip(), []).append(r["id"])
+
+    suggestions: dict[str, dict] = {}
+    cache: dict[str, tuple[dict, float] | None] = {}
+    for value_key, ids in distinct.items():
+        if value_key not in cache:
+            cache[value_key] = _best_index_match(value_key)
+        match = cache[value_key]
+        if not match:
+            continue
+        entry, score = match
+        if score < threshold:
+            continue
+        for mid in ids:
+            suggestions[str(mid)] = {
+                "term": entry["term"],
+                "ontology_id": entry["ontology_id"],
+                "score": round(score, 3),
+            }
+
+    return {"study_id": study_id, "count": len(suggestions), "suggestions": suggestions}
 
 
 @router.post("/mappings/{mapping_id}/accept", response_model=OntologyMappingOut)
