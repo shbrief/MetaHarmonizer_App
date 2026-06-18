@@ -199,3 +199,25 @@ export interface ApiErrorBody {
         request_id?: string;
     };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Audit (admin oversight)                                          */
+/* ------------------------------------------------------------------ */
+
+export interface AuditEvent {
+    id: number;
+    study_id: string | null;
+    actor_id: number | null;
+    action: string;
+    mapping_id: number | null;
+    old_value: string | null;
+    new_value: string | null;
+    details: { curator?: string } | null;
+    created_at: string;
+}
+
+/** Cursor-paginated list envelope returned by the backend. */
+export interface Paginated<T> {
+    items: T[];
+    next_cursor: string | null;
+}

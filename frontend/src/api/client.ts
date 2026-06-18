@@ -5,12 +5,14 @@
 
 import { apiFetch, BASE } from './http';
 import type {
+    AuditEvent,
     HarmonizationResults,
     HarmonizeAccepted,
     Mapping,
     OntologyMapping,
     OntologySearchResult,
     Overview,
+    Paginated,
     QualityMetrics,
     Study,
 } from './types';
@@ -160,4 +162,23 @@ export async function editOntologyMapping(
 
 export function getExportUrl(studyId: string, format: 'harmonized' | 'cbioportal' | 'report'): string {
     return `${BASE}/export/${studyId}/${format}`;
+}
+
+/* ---------- Audit (admin) ---------- */
+
+export async function queryAudit(params: {
+    action?: string;
+    study_id?: string;
+    actor_id?: number;
+    cursor?: string;
+    limit?: number;
+}): Promise<Paginated<AuditEvent>> {
+    const qs = new URLSearchParams();
+    if (params.action) qs.set('action', params.action);
+    if (params.study_id) qs.set('study_id', params.study_id);
+    if (params.actor_id != null) qs.set('actor_id', String(params.actor_id));
+    if (params.cursor) qs.set('cursor', params.cursor);
+    if (params.limit) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return request<Paginated<AuditEvent>>(`${BASE}/audit${q ? `?${q}` : ''}`);
 }

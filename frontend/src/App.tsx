@@ -1,5 +1,5 @@
 import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Upload, Table2, BarChart3, Download, Microscope, Shield } from 'lucide-react';
+import { LayoutDashboard, Upload, Table2, BarChart3, Download, Microscope, Shield, Activity } from 'lucide-react';
 import { lazy, Suspense, type ReactNode } from 'react';
 import Brand from './components/Brand';
 import UserMenu from './components/UserMenu';
@@ -20,6 +20,7 @@ const QualityDashboard = lazy(() => import('./pages/QualityDashboard'));
 const ExportPage = lazy(() => import('./pages/ExportPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const AdminPage = lazy(() => import('./pages/AdminPage'));
+const ActivityPage = lazy(() => import('./pages/ActivityPage'));
 
 const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -68,6 +69,21 @@ function TopNav() {
             >
               <Shield className="h-4 w-4 shrink-0" />
               Admin
+            </NavLink>
+          )}
+          {hasRole('admin') && (
+            <NavLink
+              to="/activity"
+              className={({ isActive }) =>
+                `flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  isActive
+                    ? 'bg-primary-50 text-primary-700'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`
+              }
+            >
+              <Activity className="h-4 w-4 shrink-0" />
+              Activity
             </NavLink>
           )}
         </nav>
@@ -161,6 +177,7 @@ export default function App() {
       <Route path="/export/:studyId" element={<Shell><ExportPage /></Shell>} />
       <Route path="/profile" element={<Shell><ProfilePage /></Shell>} />
       <Route path="/admin" element={<Shell role="admin"><AdminPage /></Shell>} />
+      <Route path="/activity" element={<Shell role="admin"><ActivityPage /></Shell>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
