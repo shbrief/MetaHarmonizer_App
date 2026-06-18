@@ -112,7 +112,16 @@ async def get_ontology_mappings(study_id: str):
 
 def _best_index_match(value: str) -> tuple[dict, float] | None:
     """Return (index_entry, score 0..1) for the best ontology match of ``value``,
-    or None. Uses the same in-memory index + scorer as /search."""
+    or None.
+
+    Uses the same in-memory index as /search but guards against a common
+    false positive: ``partial_ratio`` treats a short value as a perfect match
+    when it's merely a *substring of a longer word* (e.g. "no" inside
+    "ade**no**ma"). We therefore only accept a hit when the normalized value
+    appears as a whole token (word boundary) in the matched entry — which keeps
+    legitimate abbreviations that are real tokens (e.g. "crc" in the entry
+    "colorectal cancer crc") while rejecting the substring noise.
+    """
     q = value.lower().strip()
     if not q or not _SEARCH_INDEX:
         return None
@@ -121,7 +130,11 @@ def _best_index_match(value: str) -> tuple[dict, float] | None:
     if not hit:
         return None
     _key, score, idx = hit
-    return _SEARCH_INDEX[idx], score / 100.0
+    entry = _SEARCH_INDEX[idx]
+    # Token-boundary guard against substring-of-word false positives.
+    if not re.search(rf"\b{re.escape(q)}\b", entry["search_key"]):
+        return None
+    return entry, score / 100.0
 
 
 def _is_term_like(value: str) -> bool:

@@ -50,6 +50,7 @@ export default function OntologyReview() {
   const [editState, setEditState] = useState<EditState | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showUnmatched, setShowUnmatched] = useState(false);
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
 
   // Search (lives inside the edit modal)
   const [searchQuery, setSearchQuery] = useState('');
@@ -181,22 +182,54 @@ export default function OntologyReview() {
   const applySuggestion = async (m: OntologyMapping) => {
     const s = suggestions[m.id];
     if (!s) return;
-    setBusy((b) => ({ ...b, [m.id]: true }));
+    // Apply to EVERY unmatched row that shares this raw value (in the same
+    // field) so a deduplicated suggestion clears all its occurrences at once —
+    // otherwise the value would reappear in the unmatched list.
+    const key = m.raw_value.trim().toLowerCase();
+    const targets = unmatched.filter(
+      (u) => u.raw_value.trim().toLowerCase() === key && u.field_name === m.field_name && suggestions[u.id],
+    );
+    const ids = targets.length ? targets : [m];
+    setBusy((b) => {
+      const nb = { ...b };
+      ids.forEach((t) => (nb[t.id] = true));
+      return nb;
+    });
     try {
-      patch(await editOntologyMapping(m.id, s.term, s.ontId));
+      const updated = await Promise.all(ids.map((t) => editOntologyMapping(t.id, s.term, s.ontId)));
+      updated.forEach(patch);
       setSuggestions((prev) => {
-        const { [m.id]: _drop, ...rest } = prev;
+        const rest = { ...prev };
+        ids.forEach((t) => delete rest[t.id]);
         return rest;
       });
-    } catch { /* ignore */ }
-    finally { setBusy((b) => ({ ...b, [m.id]: false })); }
+      toast.success(
+        `Applied ${s.term}${ids.length > 1 ? ` to ${ids.length} values` : ''}`,
+      );
+    } catch {
+      toast.error('Could not apply the term.');
+    } finally {
+      setBusy((b) => {
+        const nb = { ...b };
+        ids.forEach((t) => (nb[t.id] = false));
+        return nb;
+      });
+    }
   };
 
-  const dismissSuggestion = (id: number) =>
+  const dismissSuggestion = (m: OntologyMapping) => {
+    // Dismiss every row sharing this value so the de-duplicated card vanishes.
+    const key = m.raw_value.trim().toLowerCase();
     setSuggestions((prev) => {
-      const { [id]: _drop, ...rest } = prev;
+      const rest = { ...prev };
+      for (const u of unmatched) {
+        if (u.raw_value.trim().toLowerCase() === key && u.field_name === m.field_name) {
+          delete rest[u.id];
+        }
+      }
       return rest;
     });
+  };
 
   // Matched, filtered by status, grouped by field.
   const groupedMatched = useMemo(() => {
@@ -213,11 +246,29 @@ export default function OntologyReview() {
     return g;
   }, [unmatched]);
 
-  // Unmatched rows that picked up an ontology suggestion (shown for review).
-  const suggestedRows = useMemo(
-    () => unmatched.filter((m) => suggestions[m.id]),
-    [unmatched, suggestions],
-  );
+  // Unmatched rows that picked up an ontology suggestion, de-duplicated by
+  // (value, field) so the same value isn't listed many times. The kept row
+  // also carries how many occurrences applying it will resolve.
+  const suggestedRows = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { row: OntologyMapping; count: number }[] = [];
+    const counts = new Map<string, number>();
+    for (const m of unmatched) {
+      if (!suggestions[m.id]) continue;
+      const k = `${m.field_name}::${m.raw_value.trim().toLowerCase()}`;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    for (const m of unmatched) {
+      if (!suggestions[m.id]) continue;
+      const k = `${m.field_name}::${m.raw_value.trim().toLowerCase()}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ row: m, count: counts.get(k) ?? 1 });
+    }
+    // Highest-confidence first.
+    out.sort((a, b) => (suggestions[b.row.id]?.score ?? 0) - (suggestions[a.row.id]?.score ?? 0));
+    return out;
+  }, [unmatched, suggestions]);
 
   if (!selectedId) {
     return (
@@ -472,13 +523,16 @@ export default function OntologyReview() {
                         {suggestedRows.length} suggested {suggestedRows.length === 1 ? 'match' : 'matches'} — review &amp; apply
                       </p>
                       <ul className="space-y-1.5">
-                        {suggestedRows.map((m) => {
+                        {(showAllSuggestions ? suggestedRows : suggestedRows.slice(0, 8)).map(({ row: m, count }) => {
                           const s = suggestions[m.id];
                           const isBusy = !!busy[m.id];
                           return (
                             <li key={m.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-white px-3 py-2">
                               <div className="flex min-w-0 flex-1 items-center gap-2">
                                 <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{m.raw_value}</code>
+                                {count > 1 && (
+                                  <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">×{count}</span>
+                                )}
                                 <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
                                 <span className="truncate text-sm font-medium text-slate-900">{s.term}</span>
                                 <span className="truncate font-mono text-[11px] text-slate-400">{s.ontId}</span>
@@ -490,11 +544,11 @@ export default function OntologyReview() {
                               ) : (
                                 <div className="flex items-center gap-1">
                                   <button
-                                    title="Apply this term"
+                                    title={count > 1 ? `Apply to all ${count} occurrences` : 'Apply this term'}
                                     onClick={() => applySuggestion(m)}
                                     className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700"
                                   >
-                                    <Check className="h-3 w-3" /> Apply
+                                    <Check className="h-3 w-3" /> Apply{count > 1 ? ' all' : ''}
                                   </button>
                                   <button
                                     title="Edit before applying"
@@ -505,7 +559,7 @@ export default function OntologyReview() {
                                   </button>
                                   <button
                                     title="Dismiss"
-                                    onClick={() => dismissSuggestion(m.id)}
+                                    onClick={() => dismissSuggestion(m)}
                                     className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                                   >
                                     <X className="h-3.5 w-3.5" />
@@ -516,6 +570,14 @@ export default function OntologyReview() {
                           );
                         })}
                       </ul>
+                      {suggestedRows.length > 8 && (
+                        <button
+                          onClick={() => setShowAllSuggestions((v) => !v)}
+                          className="text-xs font-medium text-primary-700 hover:text-primary-800"
+                        >
+                          {showAllSuggestions ? 'Show fewer' : `View all ${suggestedRows.length} suggestions`}
+                        </button>
+                      )}
                     </div>
                   )}
 
