@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
   Check,
   Loader2,
@@ -28,7 +28,7 @@ import { useStudies } from '../hooks/queries';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 import StatusBadge from '../components/StatusBadge';
 import PageHeader from '../components/ui/PageHeader';
-import StudyPicker, { StudySelect } from '../components/StudyPicker';
+import StudyPicker from '../components/StudyPicker';
 import StudyGate, { isStudyReady } from '../components/StudyGate';
 import { Card, CardBody } from '../components/ui/Card';
 import type { OntologyMapping, OntologySearchResult } from '../api/types';
@@ -40,7 +40,6 @@ const hasTerm = (m: OntologyMapping) => !!(m.curator_term ?? m.ontology_term);
 
 export default function OntologyReview() {
   const { studyId } = useParams<{ studyId: string }>();
-  const navigate = useNavigate();
   const { data: studies, isLoading: studiesLoading } = useStudies();
 
   const [selectedId, setSelectedId] = useState<string | null>(studyId ?? null);
@@ -159,11 +158,6 @@ export default function OntologyReview() {
     // Only re-run when a different mapping is opened.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editState?.id]);
-
-  const handleStudyChange = (id: string) => {
-    setSelectedId(id);
-    navigate(`/ontology/${id}`, { replace: true });
-  };
 
   const closeModal = () => {
     setEditState(null);
@@ -431,7 +425,6 @@ export default function OntologyReview() {
       <PageHeader
         title="Ontology review"
         description="Curate the controlled-vocabulary terms the engine assigned to each categorical value."
-        actions={<StudySelect studies={studies} value={selectedId} onChange={handleStudyChange} />}
       />
 
       {loading ? (

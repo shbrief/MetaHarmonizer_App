@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
   Check,
   X,
@@ -18,7 +18,7 @@ import ConfidenceBadge from '../components/ConfidenceBadge';
 import StageBadge from '../components/StageBadge';
 import StatusBadge from '../components/StatusBadge';
 import PageHeader from '../components/ui/PageHeader';
-import StudyPicker, { StudySelect } from '../components/StudyPicker';
+import StudyPicker from '../components/StudyPicker';
 import StudyGate, { isStudyReady } from '../components/StudyGate';
 import { useStudies } from '../hooks/queries';
 import {
@@ -36,7 +36,6 @@ type FilterStatus = 'all' | 'pending' | 'accepted' | 'rejected';
 
 export default function MappingReview() {
   const { studyId } = useParams<{ studyId: string }>();
-  const navigate = useNavigate();
   const { data: studies, isLoading: studiesLoading } = useStudies();
 
   const [mappings, setMappings] = useState<Mapping[]>([]);
@@ -75,13 +74,7 @@ export default function MappingReview() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') =>
     type === 'success' ? toast.success(message) : toast.error(message);
 
-  // Study selector change
-  const handleStudyChange = (id: string) => {
-    setSelectedId(id);
-    navigate(`/review/${id}`, { replace: true });
-    setSelected(new Set());
-    setExpandedRow(null);
-  };
+  // Status filter
 
   // Filter + sort
   const filteredMappings = useMemo(() => {
@@ -216,9 +209,7 @@ export default function MappingReview() {
                 Reject all
               </button>
             </div>
-          ) : (
-            <StudySelect studies={studies} value={selectedId} onChange={handleStudyChange} />
-          )
+          ) : undefined
         }
       />
 

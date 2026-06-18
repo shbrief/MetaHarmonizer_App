@@ -37,7 +37,8 @@ async def _load_raw_df(db: AsyncSession, study_id: str) -> pd.DataFrame:
 
     suffix = Path(path).suffix.lower()
     sep = "\t" if suffix in (".tsv", ".txt") else ","
-    # An export counts as "preserve this study" — exempt it from the logout purge.
+    # Exporting is the "done" signal — mark the study so it's cleaned up at the
+    # next logout (the user can still export every other format first).
     await studies_repo.mark_exported(db, study_id)
     return pd.read_csv(path, sep=sep, low_memory=False)
 

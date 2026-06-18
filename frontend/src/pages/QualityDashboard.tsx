@@ -22,7 +22,7 @@ import { LoadingBlock } from '../components/ui/Feedback';
 import AnimatedNumber from '../components/ui/AnimatedNumber';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 import StageBadge from '../components/StageBadge';
-import StudyPicker, { StudySelect } from '../components/StudyPicker';
+import StudyPicker from '../components/StudyPicker';
 import type { Mapping } from '../api/types';
 
 const STAGE_COLORS: Record<string, string> = {
@@ -91,13 +91,6 @@ export default function QualityDashboard() {
       <PageHeader
         title="Quality dashboard"
         description="How this study mapped — coverage, confidence, methods, and what still needs review."
-        actions={
-          <StudySelect
-            studies={studies}
-            value={studyId}
-            onChange={(id) => navigate(`/quality/${id}`, { replace: true })}
-          />
-        }
       />
 
       {/* KPI strip — each number is distinct */}

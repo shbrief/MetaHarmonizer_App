@@ -90,8 +90,9 @@ class Study(Base, TimestampMixin, OptimisticVersionMixin):
     row_count: Mapped[int | None] = mapped_column(Integer)
     column_count: Mapped[int | None] = mapped_column(Integer)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    # Set when a study is exported; exported studies survive the logout purge
-    # (session-only retention drops only not-yet-exported work).
+    # Set when a study is exported. Exporting is the "done" signal: an exported
+    # study is cleaned up at the next logout, while in-progress (unexported)
+    # work is kept so it can be resumed.
     exported: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     schema_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("schema_versions.id", ondelete="RESTRICT")
