@@ -52,6 +52,39 @@ async def set_role(
     return UserOut.model_validate(user)
 
 
+@router.post("/users/{user_id}/approve-admin", response_model=UserOut)
+async def approve_admin_request(
+    user_id: int,
+    _admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> UserOut:
+    """Approve a pending admin-access request: promote the user to admin."""
+    user = await users_repo.get_by_id(db, user_id)
+    if not user:
+        raise NotFoundError("User not found.")
+    user.role = "admin"
+    user.admin_requested = False
+    await db.commit()
+    await db.refresh(user)
+    return UserOut.model_validate(user)
+
+
+@router.post("/users/{user_id}/reject-admin", response_model=UserOut)
+async def reject_admin_request(
+    user_id: int,
+    _admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> UserOut:
+    """Reject a pending admin-access request: clear the flag, keep curator role."""
+    user = await users_repo.get_by_id(db, user_id)
+    if not user:
+        raise NotFoundError("User not found.")
+    user.admin_requested = False
+    await db.commit()
+    await db.refresh(user)
+    return UserOut.model_validate(user)
+
+
 @router.patch("/users/{user_id}/active", response_model=UserOut)
 async def set_active(
     user_id: int,

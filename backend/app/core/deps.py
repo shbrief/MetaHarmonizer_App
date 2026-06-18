@@ -22,7 +22,7 @@ from app.repositories import api_tokens as api_tokens_repo
 from app.repositories import users as users_repo
 
 # Role hierarchy: higher number = more privilege.
-ROLE_RANK = {"viewer": 1, "curator": 2, "admin": 3}
+ROLE_RANK = {"curator": 1, "admin": 2}
 
 # API-token prefix (see app.core.security.generate_api_token).
 API_TOKEN_PREFIX = "mh_"

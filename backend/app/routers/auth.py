@@ -172,7 +172,11 @@ async def register(
         )
 
     # Bootstrap: first user is admin, the rest are curators.
-    role = "admin" if await users_repo.count_users(db) == 0 else "curator"
+    is_bootstrap = await users_repo.count_users(db) == 0
+    role = "admin" if is_bootstrap else "curator"
+    # A non-bootstrap signup may request admin access; it stays a curator with a
+    # pending flag until an existing admin approves it.
+    admin_requested = body.request_admin and not is_bootstrap
 
     user = await users_repo.create_user(
         db,
@@ -180,6 +184,7 @@ async def register(
         password_hash=hash_password(body.password),
         name=body.name,
         role=role,
+        admin_requested=admin_requested,
     )
     tokens, _ = await _issue_tokens(db, response, request, user)
     await db.commit()

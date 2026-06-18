@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, Users, LogOut, Ban, CheckCircle2 } from 'lucide-react';
+import { Shield, Users, LogOut, Ban, CheckCircle2, ShieldCheck, X } from 'lucide-react';
 import { toast } from 'sonner';
 import PageHeader from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -8,14 +8,16 @@ import Badge from '../components/ui/Badge';
 import { LoadingBlock, EmptyState } from '../components/ui/Feedback';
 import { useAuth } from '../context/AuthContext';
 import {
+  adminApproveAdmin,
   adminForceLogout,
   adminListUsers,
+  adminRejectAdmin,
   adminSetActive,
   adminSetRole,
 } from '../api/auth';
 import type { Role, User } from '../api/types';
 
-const ROLES: Role[] = ['viewer', 'curator', 'admin'];
+const ROLES: Role[] = ['curator', 'admin'];
 
 export default function AdminPage() {
   const { user: me } = useAuth();
@@ -49,7 +51,26 @@ export default function AdminPage() {
     onError: () => toast.error('Could not force sign-out'),
   });
 
+  const approveM = useMutation({
+    mutationFn: adminApproveAdmin,
+    onSuccess: (u) => {
+      invalidate();
+      toast.success(`${u.email} is now an admin`);
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Could not approve request'),
+  });
+
+  const rejectM = useMutation({
+    mutationFn: adminRejectAdmin,
+    onSuccess: (u) => {
+      invalidate();
+      toast(`Admin request for ${u.email} declined`);
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Could not decline request'),
+  });
+
   const stats = computeStats(users.data ?? []);
+  const pendingRequests = (users.data ?? []).filter((u) => u.admin_requested && u.role !== 'admin');
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -71,6 +92,49 @@ export default function AdminPage() {
         <Stat label="Curators" value={stats.curator} tone="text-accent-600" />
         <Stat label="Disabled" value={stats.disabled} tone="text-rose-600" />
       </div>
+
+      {/* Pending admin-access requests */}
+      {pendingRequests.length > 0 && (
+        <Card className="overflow-hidden border-amber-200">
+          <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/70 px-5 py-3">
+            <ShieldCheck className="h-4 w-4 text-amber-600" />
+            <h3 className="text-sm font-semibold text-amber-800">
+              Admin access requests
+              <span className="ml-1.5 font-normal text-amber-600">({pendingRequests.length})</span>
+            </h3>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {pendingRequests.map((u) => (
+              <li key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-800">{u.name || u.email}</p>
+                  <p className="truncate text-xs text-slate-500">{u.email}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                    loading={approveM.isPending && approveM.variables === u.id}
+                    onClick={() => approveM.mutate(u.id)}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-rose-600 hover:bg-rose-50"
+                    icon={<X className="h-3.5 w-3.5" />}
+                    loading={rejectM.isPending && rejectM.variables === u.id}
+                    onClick={() => rejectM.mutate(u.id)}
+                  >
+                    Decline
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card className="overflow-hidden">
         {users.isLoading ? (

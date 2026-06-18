@@ -46,9 +46,14 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="true")
     email_verified: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    # Set when a curator asks to be promoted to admin at registration; an
+    # existing admin approves (role -> admin) or rejects (flag cleared).
+    admin_requested: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
 
     __table_args__ = (
-        CheckConstraint("role in ('viewer','curator','admin')", name="role_valid"),
+        CheckConstraint("role in ('curator','admin')", name="role_valid"),
     )
 
 

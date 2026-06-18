@@ -8,7 +8,6 @@ import type { Role } from '../api/types';
 const ROLE_TONE: Record<Role, string> = {
   admin: 'bg-primary-50 text-primary-700',
   curator: 'bg-accent-100 text-accent-700',
-  viewer: 'bg-slate-100 text-slate-600',
 };
 
 export default function UserMenu() {

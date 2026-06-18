@@ -152,7 +152,7 @@ export interface Overview {
 /*  Auth                                                              */
 /* ------------------------------------------------------------------ */
 
-export type Role = 'viewer' | 'curator' | 'admin';
+export type Role = 'curator' | 'admin';
 
 export interface User {
     id: number;
@@ -161,6 +161,7 @@ export interface User {
     role: Role;
     is_active: boolean;
     email_verified: boolean;
+    admin_requested?: boolean;
 }
 
 export interface TokenResponse {

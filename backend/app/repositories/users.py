@@ -33,12 +33,14 @@ async def create_user(
     password_hash: str | None,
     name: str | None,
     role: str,
+    admin_requested: bool = False,
 ) -> User:
     user = User(
         email=email,
         password_hash=password_hash,
         name=name,
         role=role,
+        admin_requested=admin_requested,
     )
     db.add(user)
     await db.flush()

@@ -34,6 +34,7 @@ export default function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [requestAdmin, setRequestAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -45,8 +46,11 @@ export default function RegisterPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const user = await register(email, password, name || undefined);
+      const user = await register(email, password, name || undefined, requestAdmin);
       toast.success(`Account created — welcome, ${user.name || user.email}`);
+      if (requestAdmin && user.role !== 'admin') {
+        toast('Admin access requested — an administrator will review it.');
+      }
       navigate('/', { replace: true });
     } catch (err) {
       const msg =
@@ -125,6 +129,22 @@ export default function RegisterPage() {
             </div>
           )}
         </div>
+
+        {/* Admin access request — never grants admin directly. */}
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-3">
+          <input
+            type="checkbox"
+            checked={requestAdmin}
+            onChange={(e) => setRequestAdmin(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+          />
+          <span className="text-sm">
+            <span className="font-medium text-slate-800">Request administrator access</span>
+            <span className="mt-0.5 block text-xs text-slate-500">
+              You’ll join as a curator. An existing administrator must approve admin access — it isn’t granted automatically.
+            </span>
+          </span>
+        </label>
 
         {error && (
           <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">

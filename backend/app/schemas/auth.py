@@ -12,6 +12,10 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=200)
     name: str | None = Field(default=None, max_length=200)
+    # Optional: request administrator access. Never grants admin directly —
+    # the account is created as a curator with a pending request an existing
+    # admin must approve.
+    request_admin: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -28,6 +32,7 @@ class UserOut(BaseModel):
     role: str
     is_active: bool
     email_verified: bool
+    admin_requested: bool = False
 
 
 class TokenResponse(BaseModel):
@@ -48,7 +53,7 @@ class SessionOut(BaseModel):
 
 
 class RoleUpdate(BaseModel):
-    role: Literal["viewer", "curator", "admin"]
+    role: Literal["curator", "admin"]
 
 
 class ActiveUpdate(BaseModel):

@@ -20,14 +20,19 @@ interface AuthContextValue {
     initializing: boolean;
     isAuthenticated: boolean;
     login: (email: string, password: string) => Promise<User>;
-    register: (email: string, password: string, name?: string) => Promise<User>;
+    register: (
+        email: string,
+        password: string,
+        name?: string,
+        requestAdmin?: boolean,
+    ) => Promise<User>;
     logout: () => Promise<void>;
     setUser: (u: User | null) => void;
-    /** Role hierarchy check: viewer < curator < admin. */
+    /** Role hierarchy check: curator < admin. */
     hasRole: (minimum: Role) => boolean;
 }
 
-const ROLE_RANK: Record<Role, number> = { viewer: 1, curator: 2, admin: 3 };
+const ROLE_RANK: Record<Role, number> = { curator: 1, admin: 2 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -62,8 +67,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser(res.user);
                 return res.user;
             },
-            register: async (email, password, name) => {
-                const res = await apiRegister({ email, password, name });
+            register: async (email, password, name, requestAdmin) => {
+                const res = await apiRegister({
+                    email,
+                    password,
+                    name,
+                    request_admin: requestAdmin,
+                });
                 setUser(res.user);
                 return res.user;
             },

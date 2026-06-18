@@ -18,6 +18,7 @@ export async function register(input: {
     email: string;
     password: string;
     name?: string;
+    request_admin?: boolean;
 }): Promise<TokenResponse> {
     const res = await apiFetch<TokenResponse>('/auth/register', {
         method: 'POST',
@@ -125,6 +126,14 @@ export async function adminSetRole(userId: number, role: Role): Promise<User> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role }),
     });
+}
+
+export async function adminApproveAdmin(userId: number): Promise<User> {
+    return apiFetch<User>(`/admin/users/${userId}/approve-admin`, { method: 'POST' });
+}
+
+export async function adminRejectAdmin(userId: number): Promise<User> {
+    return apiFetch<User>(`/admin/users/${userId}/reject-admin`, { method: 'POST' });
 }
 
 export async function adminSetActive(userId: number, isActive: boolean): Promise<User> {
