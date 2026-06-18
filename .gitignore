@@ -37,6 +37,7 @@ frontend/dist/
 backend/data/uploads/*
 backend/data/metaharmonizer.db
 backend/data/nci_cache.json
+backend/data/nci_schema_cache.json
 !backend/data/uploads/.gitkeep
 
 # Generated evaluation outputs (timestamped runs)

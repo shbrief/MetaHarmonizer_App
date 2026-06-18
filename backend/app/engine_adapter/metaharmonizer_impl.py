@@ -75,6 +75,11 @@ class MetaHarmonizerAdapter:
     @lru_cache(maxsize=8)
     def _engine_for(self, csv_path: str):
         pkg = _require_pkg()
+        # Install perf patches (shared model + persistent NCI cache) before the
+        # first engine is constructed so every study benefits. Idempotent.
+        from . import _perf
+
+        _perf.install_patches()
         # Upstream layout (subject to change — adjust here, never in routers):
         SchemaMapEngine = pkg.SchemaMapEngine  # type: ignore[attr-defined]
         return SchemaMapEngine(
@@ -97,6 +102,11 @@ class MetaHarmonizerAdapter:
             raise ValueError("metaharmonizer adapter requires csv_path")
         engine = self._engine_for(csv_path)
         raw = engine.run_schema_mapping()
+        # Persist any new NCI EVS lookups so the next study (and the next
+        # process) reuses them instead of re-hitting the network.
+        from . import _perf
+
+        _perf.save_nci_cache()
         return [self._to_dashboard_row(r) for r in raw.to_dict(orient="records")]
 
     def map_values(
@@ -129,9 +139,14 @@ class MetaHarmonizerAdapter:
         ]
 
     def pre_warm(self) -> None:
-        # Touch the package so the import cost is paid at startup, not
-        # on the first user request.
+        # Pay the import + model-load cost at startup, not on the first user
+        # request, and install the shared-model / persistent-NCI-cache patches
+        # so every study after the first is fast.
         _require_pkg()
+        from . import _perf
+
+        _perf.install_patches()
+        _perf.warm_model()
 
     def health(self) -> EngineHealth:
         try:

@@ -1,0 +1,190 @@
+"""
+Performance patches for the upstream ``metaharmonizer`` engine.
+
+This module lives inside ``engine_adapter/`` — the ONLY place the project is
+allowed to import ``metaharmonizer`` (enforced by
+``scripts/check_engine_boundary.py``). It applies two safe, behaviour-preserving
+optimisations exactly once per process. Neither changes matching results; both
+are pure memoisation.
+
+Why this is needed
+------------------
+The adapter builds a fresh ``SchemaMapEngine`` for every distinct uploaded CSV
+(``MetaHarmonizerAdapter._engine_for`` is keyed by file path). Upstream's
+per-study construction is expensive in two ways:
+
+1. **Model reload.** ``SchemaMapEngine`` constructs a ``SentenceTransformer`` in
+   three places (``engine``, ``loaders.value_loader``, ``loaders.dict_loader``)
+   for *every* study. Loading ``all-MiniLM-L6-v2`` is ~2.5s and happens twice
+   per construction. → Patch 1 shares one instance per model name process-wide.
+
+2. **Repeated live NCI EVS calls.** Stage-2 ontology matching calls the live NCI
+   EVS REST API (rate-limited to ~8 req/s) for every novel value in every
+   non-numeric column. Upstream keeps the results in per-instance dicts that are
+   discarded when the engine is rebuilt for the next study, so common clinical
+   values (sex, stage, race, vital status, …) are re-fetched over the network on
+   every upload. → Patch 2 points every ``NCIClientSync`` at the same
+   process-wide dicts, seeded from disk and flushed back after each run, so each
+   value is looked up at most once — ever.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+from pathlib import Path
+from typing import Any
+
+# ---------------------------------------------------------------------------
+# Module state (process-wide, guarded by locks)
+# ---------------------------------------------------------------------------
+_installed = False
+_install_lock = threading.Lock()
+
+# Patch 1 — one SentenceTransformer per model name.
+_model_cache: dict[str, Any] = {}
+_model_lock = threading.Lock()
+
+# Patch 2 — persistent, shared NCI EVS lookup cache.
+# Stored alongside the dashboard's other data assets. Kept separate from the
+# dashboard-owned ``nci_cache.json`` (different schema/owner).
+_NCI_CACHE_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "nci_schema_cache.json"
+)
+_nci_term2code: dict[str, Any] = {}       # normalized term -> code | None
+_nci_code2category: dict[str, Any] = {}   # code -> [category, ...] | None
+_nci_lock = threading.Lock()
+_nci_loaded = False
+
+
+# ---------------------------------------------------------------------------
+# Patch 1: shared SentenceTransformer
+# ---------------------------------------------------------------------------
+def _make_cached_sentence_transformer(real_cls):
+    """Return a factory that hands back one cached instance per model name.
+
+    Only the plain ``SentenceTransformer(name)`` form is cached; any call with
+    extra args/kwargs falls through to the real constructor untouched, so we
+    never accidentally share a differently-configured model.
+    """
+
+    def factory(model_name_or_path=None, *args, **kwargs):
+        if args or kwargs or model_name_or_path is None:
+            return real_cls(model_name_or_path, *args, **kwargs)
+        key = str(model_name_or_path)
+        cached = _model_cache.get(key)
+        if cached is None:
+            with _model_lock:
+                cached = _model_cache.get(key)
+                if cached is None:
+                    cached = real_cls(model_name_or_path)
+                    _model_cache[key] = cached
+        return cached
+
+    return factory
+
+
+def _patch_sentence_transformer() -> None:
+    from metaharmonizer.models.schema_mapper import engine as _engine
+    from metaharmonizer.models.schema_mapper.loaders import (
+        dict_loader as _dl,
+        value_loader as _vl,
+    )
+
+    real_cls = _engine.SentenceTransformer
+    if getattr(real_cls, "_mh_is_cached_factory", False):
+        return
+    factory = _make_cached_sentence_transformer(real_cls)
+    factory._mh_is_cached_factory = True  # type: ignore[attr-defined]
+    for mod in (_engine, _vl, _dl):
+        if getattr(mod, "SentenceTransformer", None) is real_cls:
+            mod.SentenceTransformer = factory
+
+
+def warm_model() -> None:
+    """Load the default field model once so the cost is paid at startup."""
+    try:
+        from metaharmonizer.models.schema_mapper import engine as _engine
+        from metaharmonizer.models.schema_mapper.config import FIELD_MODEL
+
+        _engine.SentenceTransformer(FIELD_MODEL)
+    except Exception:
+        # Warming is best-effort; never block startup on it.
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Patch 2: persistent, shared NCI cache
+# ---------------------------------------------------------------------------
+def _load_nci_cache() -> None:
+    global _nci_loaded
+    if _nci_loaded:
+        return
+    with _nci_lock:
+        if _nci_loaded:
+            return
+        try:
+            if _NCI_CACHE_PATH.exists():
+                raw = json.loads(_NCI_CACHE_PATH.read_text(encoding="utf-8"))
+                if isinstance(raw.get("term2code"), dict):
+                    _nci_term2code.update(raw["term2code"])
+                if isinstance(raw.get("code2category"), dict):
+                    _nci_code2category.update(raw["code2category"])
+        except Exception:
+            # A corrupt cache must never break harmonization; start empty.
+            pass
+        _nci_loaded = True
+
+
+def save_nci_cache() -> None:
+    """Atomically flush the shared NCI cache to disk (best-effort)."""
+    if not _nci_loaded:
+        return
+    try:
+        with _nci_lock:
+            payload = {
+                "term2code": _nci_term2code,
+                "code2category": _nci_code2category,
+            }
+            _NCI_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _NCI_CACHE_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(tmp, _NCI_CACHE_PATH)
+    except Exception:
+        pass
+
+
+def _patch_nci_client() -> None:
+    from metaharmonizer.utils.ncit_match_utils import NCIClientSync
+
+    if getattr(NCIClientSync, "_mh_cache_patched", False):
+        return
+    orig_init = NCIClientSync.__init__
+
+    def patched_init(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        # Share the SAME dicts across every instance/study so lookups
+        # accumulate process-wide and persist across restarts.
+        self.term2code = _nci_term2code
+        self.code2category = _nci_code2category
+
+    NCIClientSync.__init__ = patched_init
+    NCIClientSync._mh_cache_patched = True  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+def install_patches() -> None:
+    """Idempotently install all engine performance patches."""
+    global _installed
+    if _installed:
+        return
+    with _install_lock:
+        if _installed:
+            return
+        _patch_sentence_transformer()
+        _patch_nci_client()
+        _load_nci_cache()
+        _installed = True
