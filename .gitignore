@@ -46,6 +46,9 @@ backend/data/schema_mapping_eval/*_s[0-9]_*_manual_*.csv
 # Build artifacts
 *.tsbuildinfo
 
+# Test artifacts
+.playwright-mcp/
+
 # Personal / local-only documents
 GSoC_Proposal.md
 GSOC_Proposal.pdf

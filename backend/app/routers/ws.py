@@ -17,7 +17,7 @@ import logging
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user
+from app.core.deps import current_user, require_role
 from app.core.jobs import (
     get_snapshot,
     job_channel,
@@ -60,6 +60,21 @@ async def job_status(
         "error_code": job.error_code if job else None,
         "progress": snapshot,
     }
+
+
+@router.post("/jobs/{study_id}/cancel", status_code=202)
+async def cancel_job(
+    study_id: str,
+    user: User = Depends(require_role("curator")),
+) -> dict[str, object]:
+    """Request cancellation of a running harmonize job (HTTP equivalent of the
+    WebSocket ``cancel`` action, for clients that poll rather than hold a WS).
+
+    Sets the Redis cancel flag the worker polls at each stage boundary; the
+    terminal ``cancelled`` state is then broadcast on the bus as usual.
+    """
+    await request_cancel(study_id)
+    return {"study_id": study_id, "cancel_requested": True}
 
 
 async def _relay_channel(ws: WebSocket, channel: str) -> None:

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, AlertCircle, FileSpreadsheet, ArrowRight, Sparkles, Loader2, X } from 'lucide-react';
@@ -8,11 +8,10 @@ import PageHeader from '../components/ui/PageHeader';
 import { Card, CardBody } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { uploadAndHarmonize } from '../api/client';
-import { subscribeJob, type JobSubscription } from '../api/jobs';
+import { useJobs } from '../context/JobsContext';
 import { ApiError } from '../api/http';
-import type { HarmonizeAccepted, JobProgress } from '../api/types';
 
-type UploadState = 'idle' | 'uploading' | 'processing' | 'success' | 'error';
+type UploadState = 'idle' | 'uploading' | 'error';
 
 const STAGES = [
   { stage: 'Stage 1', title: 'Dict / Fuzzy', desc: 'Dictionary lookup + RapidFuzz string matching against curated fields', tone: 'bg-primary-50 text-primary-700' },
@@ -24,57 +23,45 @@ const STAGES = [
 export default function UploadPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { track, cancel, jobs } = useJobs();
   const [state, setState] = useState<UploadState>('idle');
-  const [accepted, setAccepted] = useState<HarmonizeAccepted | null>(null);
-  const [progress, setProgress] = useState<JobProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const subRef = useRef<JobSubscription | null>(null);
+  // The study this upload session is following. Falls back (after a reload) to
+  // the most recently-started job so the in-page view is restored too.
+  const [currentStudyId, setCurrentStudyId] = useState<string | null>(null);
+
+  const followed = useMemo(() => {
+    if (currentStudyId) return jobs.find((j) => j.studyId === currentStudyId) ?? null;
+    // After a refresh we lose currentStudyId; show the newest active job so the
+    // upload page reflects in-flight work (the tray shows the rest).
+    const active = jobs.filter((j) => j.phase === 'queued' || j.phase === 'processing');
+    return active.length ? active[0] : null;
+  }, [currentStudyId, jobs]);
 
   const handleFileSelected = (f: File) => {
     setFile(f);
     setError(null);
     setState('idle');
-    setProgress(null);
   };
 
   const handleUpload = async () => {
     if (!file) return;
     setState('uploading');
     setError(null);
-    setProgress(null);
     try {
       const res = await uploadAndHarmonize(file);
-      setAccepted(res);
-      setState('processing');
+      setCurrentStudyId(res.study_id);
+      setState('idle');
+      setFile(null);
       qc.invalidateQueries({ queryKey: ['studies'] });
-
-      // Open the live progress stream.
-      subRef.current = await subscribeJob(res.study_id, {
-        onProgress: (p) => {
-          setProgress(p);
-          if (p.type === 'complete') {
-            setState('success');
-            qc.invalidateQueries({ queryKey: ['studies'] });
-            qc.invalidateQueries({ queryKey: ['overview'] });
-            toast.success('Harmonization complete');
-            subRef.current?.close();
-          } else if (p.type === 'failed') {
-            setState('error');
-            setError(p.message);
-            toast.error(p.message);
-            subRef.current?.close();
-          } else if (p.type === 'cancelled') {
-            setState('idle');
-            setProgress(null);
-            toast('Harmonization cancelled');
-            subRef.current?.close();
-          }
-        },
-        onError: () => {
-          // WS dropped — fall back to a gentle message; the job still runs.
-          toast('Live updates interrupted — refresh to check status.');
-        },
+      // Hand off to the persistent tracker — it polls the backend, survives
+      // refresh/tab-switch, and drives both this page and the docked tray.
+      track({
+        studyId: res.study_id,
+        studyName: res.study_name,
+        rowCount: res.row_count,
+        columnCount: res.column_count,
       });
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Upload failed';
@@ -84,10 +71,8 @@ export default function UploadPage() {
     }
   };
 
-  const handleCancel = () => {
-    subRef.current?.cancel();
-    toast('Cancelling…');
-  };
+  const processing = followed && (followed.phase === 'queued' || followed.phase === 'processing');
+  const done = followed && followed.phase === 'done';
 
   return (
     <div className="mx-auto max-w-3xl space-y-7">
@@ -96,10 +81,10 @@ export default function UploadPage() {
         description="Upload a CSV/TSV file with clinical metadata. The pipeline maps columns to the curated reference schema automatically."
       />
 
-      <FileUploader onFileSelected={handleFileSelected} disabled={state === 'uploading' || state === 'processing'} />
+      <FileUploader onFileSelected={handleFileSelected} disabled={state === 'uploading' || !!processing} />
 
       {/* Selected file → run */}
-      {file && state !== 'success' && state !== 'processing' && (
+      {file && !processing && !done && (
         <Card>
           <CardBody className="flex items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
@@ -123,21 +108,24 @@ export default function UploadPage() {
       )}
 
       {/* Live processing */}
-      {state === 'processing' && accepted && (
+      {processing && followed && (
         <Card className="border-primary-200">
           <CardBody className="space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
                 <Loader2 className="mt-0.5 h-6 w-6 animate-spin text-primary-600" />
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">Harmonizing {accepted.study_name}…</h3>
+                  <h3 className="text-lg font-semibold text-slate-900">Harmonizing {followed.studyName}…</h3>
                   <p className="mt-0.5 text-sm text-slate-500">
-                    {progress?.message ?? 'Starting…'} · {accepted.row_count.toLocaleString()} rows ·{' '}
-                    {accepted.column_count} columns
+                    {followed.message}
+                    {followed.rowCount != null && (
+                      <> · {followed.rowCount.toLocaleString()} rows</>
+                    )}
+                    {followed.columnCount != null && <> · {followed.columnCount} columns</>}
                   </p>
                 </div>
               </div>
-              <Button variant="ghost" size="sm" className="text-rose-600 hover:bg-rose-50" icon={<X className="h-3.5 w-3.5" />} onClick={handleCancel}>
+              <Button variant="ghost" size="sm" className="text-rose-600 hover:bg-rose-50" icon={<X className="h-3.5 w-3.5" />} onClick={() => cancel(followed.studyId)}>
                 Cancel
               </Button>
             </div>
@@ -146,7 +134,7 @@ export default function UploadPage() {
             <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full rounded-full bg-primary-500 transition-all duration-500"
-                style={{ width: `${progress?.pct ?? 5}%` }}
+                style={{ width: `${Math.max(5, followed.pct)}%` }}
               />
             </div>
 
@@ -158,8 +146,8 @@ export default function UploadPage() {
                 { key: 'ontology', label: 'Ontology' },
                 { key: 'done', label: 'Finalize' },
               ].map((s) => {
-                const reached = (progress?.pct ?? 0) >= stagePct(s.key);
-                const active = progress?.stage === s.key;
+                const reached = followed.pct >= stagePct(s.key);
+                const active = followed.stage === s.key;
                 return (
                   <span
                     key={s.key}
@@ -171,34 +159,41 @@ export default function UploadPage() {
                 );
               })}
             </div>
+
+            <p className="text-xs text-slate-400">
+              You can leave this page — progress keeps running and stays visible in the tray (bottom-right), even after a refresh.
+            </p>
           </CardBody>
         </Card>
       )}
 
       {/* Success */}
-      {state === 'success' && accepted && (
+      {done && followed && (
         <Card className="border-emerald-200 bg-emerald-50/40">
           <CardBody className="space-y-5">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5 h-6 w-6 text-emerald-600" />
               <div>
                 <h3 className="text-lg font-semibold text-emerald-900">Harmonization complete</h3>
-                <p className="mt-0.5 text-sm text-emerald-700">{progress?.message ?? 'Done.'}</p>
+                <p className="mt-0.5 text-sm text-emerald-700">{followed.message || 'Done.'}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-3 gap-3">
-              <Stat label="Study" value={accepted.study_name} />
-              <Stat label="Rows" value={accepted.row_count.toLocaleString()} />
-              <Stat label="Columns" value={accepted.column_count.toLocaleString()} />
+              <Stat label="Study" value={followed.studyName} />
+              <Stat label="Rows" value={followed.rowCount != null ? followed.rowCount.toLocaleString() : '—'} />
+              <Stat label="Columns" value={followed.columnCount != null ? followed.columnCount.toLocaleString() : '—'} />
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button onClick={() => navigate(`/review/${accepted.study_id}`)} icon={<ArrowRight className="h-4 w-4" />}>
+              <Button onClick={() => navigate(`/review/${followed.studyId}`)} icon={<ArrowRight className="h-4 w-4" />}>
                 Review mappings
               </Button>
-              <Button variant="secondary" onClick={() => navigate(`/quality/${accepted.study_id}`)}>
+              <Button variant="secondary" onClick={() => navigate(`/quality/${followed.studyId}`)}>
                 View quality dashboard
+              </Button>
+              <Button variant="ghost" onClick={() => setCurrentStudyId(null)}>
+                Upload another
               </Button>
             </div>
           </CardBody>

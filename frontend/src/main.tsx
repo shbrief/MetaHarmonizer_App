@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
+import { JobsProvider } from './context/JobsContext';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -23,7 +24,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <App />
+          <JobsProvider>
+            <App />
+          </JobsProvider>
           <Toaster
             position="top-right"
             richColors

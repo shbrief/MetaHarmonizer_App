@@ -4,6 +4,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import Brand from './components/Brand';
 import UserMenu from './components/UserMenu';
 import ProtectedRoute from './components/ProtectedRoute';
+import ProcessingTray from './components/ProcessingTray';
 import { LoadingBlock } from './components/ui/Feedback';
 import { useAuth } from './context/AuthContext';
 
@@ -112,6 +113,7 @@ function AppLayout({ children }: { children: ReactNode }) {
       <footer className="border-t border-slate-200 bg-white/60 py-4 text-center text-xs text-slate-400 backdrop-blur">
         MetaHarmonizer Dashboard · Biomedical Metadata Harmonization · cBioPortal Compatible
       </footer>
+      <ProcessingTray />
     </div>
   );
 }
