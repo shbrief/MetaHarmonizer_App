@@ -215,21 +215,25 @@ export function JobsProvider({ children }: { children: ReactNode }) {
 
             if (stopped) return;
 
+            // Compute the next state and detect terminal transitions *outside*
+            // the setState updater. React doesn't run an updater synchronously,
+            // so collecting side-effects (notifications) inside it would leave
+            // this list empty when we read it below. jobsRef.current is the
+            // latest committed state, so it's a safe source of truth here.
+            const prev = jobsRef.current;
             const justFinished: TrackedJob[] = [];
-            setJobs((prev) => {
-                const next = prev.map((j) => {
-                    const r = results.find(
-                        (x) => x.status === 'fulfilled' && x.value.id === j.studyId,
-                    );
-                    if (!r || r.status !== 'fulfilled') return j;
-                    const updated = reconcile(j, r.value.status);
-                    if (!isTerminal(j.phase) && isTerminal(updated.phase)) {
-                        justFinished.push(updated);
-                    }
-                    return updated;
-                });
-                return next;
+            const next = prev.map((j) => {
+                const r = results.find(
+                    (x) => x.status === 'fulfilled' && x.value.id === j.studyId,
+                );
+                if (!r || r.status !== 'fulfilled') return j;
+                const updated = reconcile(j, r.value.status);
+                if (!isTerminal(j.phase) && isTerminal(updated.phase)) {
+                    justFinished.push(updated);
+                }
+                return updated;
             });
+            setJobs(next);
 
             // Side effects for newly-finished jobs (toast + bell + cache refresh).
             for (const job of justFinished) {
