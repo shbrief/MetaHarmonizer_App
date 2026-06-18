@@ -48,13 +48,14 @@ async def set_role(
         # everyone out; promotion of others is fine.
         raise ForbiddenError("You cannot remove your own admin role.")
     old_role = user.role
+    target = actor_label(user)
     user.role = body.role
     await audit_repo.add_audit_entry(
         db,
         study_id=None,
         action="admin_set_role",
-        old_value=f"user {user_id}: {old_role}",
-        new_value=body.role,
+        old_value=f"{target}: {old_role}",
+        new_value=f"{target} → {body.role}",
         actor_id=admin.id,
         curator=actor_label(admin),
     )
@@ -79,7 +80,7 @@ async def approve_admin_request(
         db,
         study_id=None,
         action="admin_approve_request",
-        new_value=f"user {user_id} -> admin",
+        new_value=f"{actor_label(user)} → admin",
         actor_id=admin.id,
         curator=actor_label(admin),
     )
@@ -103,7 +104,7 @@ async def reject_admin_request(
         db,
         study_id=None,
         action="admin_reject_request",
-        new_value=f"user {user_id} request denied",
+        new_value=f"{actor_label(user)} request denied",
         actor_id=admin.id,
         curator=actor_label(admin),
     )
@@ -132,7 +133,7 @@ async def set_active(
         db,
         study_id=None,
         action="admin_set_active",
-        new_value=f"user {user_id}: {'enabled' if body.is_active else 'disabled'}",
+        new_value=f"{actor_label(user)}: {'enabled' if body.is_active else 'disabled'}",
         actor_id=admin.id,
         curator=actor_label(admin),
     )
@@ -156,7 +157,7 @@ async def force_logout(
         db,
         study_id=None,
         action="admin_force_logout",
-        new_value=f"user {user_id}",
+        new_value=actor_label(user),
         actor_id=admin.id,
         curator=actor_label(admin),
     )
