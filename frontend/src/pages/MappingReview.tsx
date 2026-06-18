@@ -19,6 +19,7 @@ import StageBadge from '../components/StageBadge';
 import StatusBadge from '../components/StatusBadge';
 import PageHeader from '../components/ui/PageHeader';
 import StudyPicker, { StudySelect } from '../components/StudyPicker';
+import StudyGate, { isStudyReady } from '../components/StudyGate';
 import { useStudies } from '../hooks/queries';
 import {
   getStudyMappings,
@@ -188,6 +189,13 @@ export default function MappingReview() {
         basePath="/review"
       />
     );
+  }
+
+  // Study selected but not yet harmonized → show a readiness gate instead of an
+  // empty table (auto-resolves to the real page once processing completes).
+  const selectedStudy = studies?.find((s) => s.id === selectedId);
+  if (selectedStudy && !isStudyReady(selectedStudy.status)) {
+    return <StudyGate study={selectedStudy} title="Mapping review" />;
   }
 
   return (
