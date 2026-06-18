@@ -15,6 +15,8 @@ import {
   LogOut,
   Search,
   ChevronDown,
+  Calendar,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { queryAudit } from '../api/client';
@@ -52,7 +54,9 @@ const TIME_RANGES: { label: string; hours: number | null }[] = [
   { label: 'Last 24 hours', hours: 24 },
   { label: 'Last 7 days', hours: 24 * 7 },
   { label: 'Last 30 days', hours: 24 * 30 },
+  { label: 'Custom range…', hours: null },
 ];
+const CUSTOM_RANGE = TIME_RANGES.length - 1;
 
 function meta(action: string) {
   return (
@@ -92,6 +96,9 @@ export default function ActivityPage() {
   const [studyId, setStudyId] = useState('');
   const [actor, setActor] = useState<User | null>(null);
   const [rangeIdx, setRangeIdx] = useState(0);
+  // Custom date range (used when rangeIdx === CUSTOM_RANGE); 'YYYY-MM-DD'.
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const usersQuery = useQuery({ queryKey: ['admin', 'users'], queryFn: adminListUsers });
   const usersById = useMemo(() => {
@@ -100,17 +107,49 @@ export default function ActivityPage() {
     return m;
   }, [usersQuery.data]);
 
+  // Distinct studies seen in recent activity — fetched independently of the
+  // study filter so the picker list stays stable while filtering. (Studies are
+  // per-user/private, so there's no global studies list an admin could use.)
+  const studyOptionsQuery = useQuery({
+    queryKey: ['audit', 'study-options'],
+    queryFn: () => queryAudit({ limit: 200 }),
+  });
+  const studyOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of studyOptionsQuery.data?.items ?? []) {
+      if (!e.study_id) continue;
+      // study_delete / study_complete carry the study name in new_value.
+      if (!map.get(e.study_id) && (e.action === 'study_delete' || e.action === 'study_complete') && e.new_value) {
+        map.set(e.study_id, e.new_value);
+      } else if (!map.has(e.study_id)) {
+        map.set(e.study_id, '');
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [studyOptionsQuery.data]);
+
   const since = useMemo(() => {
+    if (rangeIdx === CUSTOM_RANGE) {
+      return fromDate ? new Date(`${fromDate}T00:00:00`).toISOString() : undefined;
+    }
     const hrs = TIME_RANGES[rangeIdx].hours;
     if (!hrs) return undefined;
     return new Date(Date.now() - hrs * 3600_000).toISOString();
-  }, [rangeIdx]);
+  }, [rangeIdx, fromDate]);
+
+  const until = useMemo(() => {
+    if (rangeIdx === CUSTOM_RANGE && toDate) {
+      return new Date(`${toDate}T23:59:59`).toISOString();
+    }
+    return undefined;
+  }, [rangeIdx, toDate]);
 
   const filters = {
     action: action || undefined,
     study_id: studyId.trim() || undefined,
     actor_id: actor?.id,
     since,
+    until,
   };
 
   const query = useInfiniteQuery({
@@ -138,6 +177,8 @@ export default function ActivityPage() {
     setStudyId('');
     setActor(null);
     setRangeIdx(0);
+    setFromDate('');
+    setToDate('');
   };
   const hasFilters = !!(action || studyId || actor || rangeIdx);
 
@@ -163,31 +204,22 @@ export default function ActivityPage() {
           />
 
           {/* Time range */}
-          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-            When
-            <select
-              value={rangeIdx}
-              onChange={(e) => setRangeIdx(Number(e.target.value))}
-              className="field !py-2"
-            >
-              {TIME_RANGES.map((r, i) => (
-                <option key={r.label} value={i}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <WhenFilter
+            rangeIdx={rangeIdx}
+            onRange={setRangeIdx}
+            from={fromDate}
+            to={toDate}
+            onFrom={setFromDate}
+            onTo={setToDate}
+          />
 
-          {/* Study id */}
-          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-            Study ID
-            <input
-              value={studyId}
-              onChange={(e) => setStudyId(e.target.value)}
-              placeholder="e.g. new_meta_1a2b"
-              className="field !py-2"
-            />
-          </label>
+          {/* Study — searchable by id or name prefix */}
+          <StudyFilter
+            studies={studyOptions}
+            loading={studyOptionsQuery.isLoading}
+            value={studyId}
+            onChange={setStudyId}
+          />
 
           {hasFilters && (
             <button onClick={clearFilters} className="btn btn-sm border border-slate-200 text-slate-600 hover:bg-slate-50">
@@ -397,6 +429,161 @@ function UserFilter({
                   <span className="block truncate text-xs text-slate-400">
                     {u.email} · {u.role}
                   </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- When filter (presets + custom date range) ---------- */
+
+function WhenFilter({
+  rangeIdx,
+  onRange,
+  from,
+  to,
+  onFrom,
+  onTo,
+}: {
+  rangeIdx: number;
+  onRange: (i: number) => void;
+  from: string;
+  to: string;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+}) {
+  const custom = rangeIdx === CUSTOM_RANGE;
+  return (
+    <div className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+      <span className="flex items-center gap-1.5">
+        <Calendar className="h-3.5 w-3.5 text-slate-400" />
+        When
+      </span>
+      <div className="flex items-center gap-2">
+        <select
+          value={rangeIdx}
+          onChange={(e) => onRange(Number(e.target.value))}
+          className="field !py-2"
+        >
+          {TIME_RANGES.map((r, i) => (
+            <option key={r.label} value={i}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        {custom && (
+          <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5">
+            <input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => onFrom(e.target.value)}
+              className="bg-transparent text-xs text-slate-700 outline-none"
+              aria-label="From date"
+            />
+            <span className="text-slate-400">→</span>
+            <input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => onTo(e.target.value)}
+              className="bg-transparent text-xs text-slate-700 outline-none"
+              aria-label="To date"
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Study filter (search by id or name prefix) ---------- */
+
+function StudyFilter({
+  studies,
+  loading,
+  value,
+  onChange,
+}: {
+  studies: { id: string; name: string }[];
+  loading: boolean;
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return studies;
+    return studies.filter(
+      (s) => s.id.toLowerCase().startsWith(needle) || s.name.toLowerCase().startsWith(needle),
+    );
+  }, [studies, q]);
+
+  const selected = studies.find((s) => s.id === value);
+  const label = selected ? selected.name || selected.id : value || 'Any study';
+
+  return (
+    <div className="relative" ref={ref}>
+      <span className="mb-1 block text-xs font-medium text-slate-600">Study</span>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          window.setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+        className="field flex !w-56 items-center justify-between gap-2 !py-2 text-left"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <FileSpreadsheet className="h-4 w-4 shrink-0 text-slate-400" />
+          <span className={`truncate ${value ? '' : 'text-slate-500'}`}>{label}</span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-72 rounded-xl border border-slate-200 bg-white shadow-lg">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search study name or id…"
+              className="w-full text-sm outline-none"
+            />
+          </div>
+          <div className="max-h-64 overflow-auto py-1">
+            <button
+              type="button"
+              onClick={() => { onChange(''); setOpen(false); }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              Any study
+            </button>
+            {loading && <p className="px-3 py-2 text-xs text-slate-400">Loading studies…</p>}
+            {!loading && filtered.length === 0 && (
+              <p className="px-3 py-2 text-xs text-slate-400">
+                {q ? 'No study matches.' : 'No studies in recent activity.'}
+              </p>
+            )}
+            {filtered.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => { onChange(s.id); setOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <FileSpreadsheet className="h-4 w-4 shrink-0 text-primary-500" />
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{s.name || s.id}</span>
+                  {s.name && <span className="block truncate text-xs text-slate-400">{s.id}</span>}
                 </span>
               </button>
             ))}
