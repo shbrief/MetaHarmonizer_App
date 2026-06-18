@@ -8,6 +8,8 @@ are no write routes here.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +28,8 @@ async def query_audit(
     study_id: str | None = Query(default=None),
     action: str | None = Query(default=None),
     actor_id: int | None = Query(default=None),
+    since: datetime | None = Query(default=None, description="ISO start of time range (inclusive)."),
+    until: datetime | None = Query(default=None, description="ISO end of time range (inclusive)."),
     cursor: str | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1, le=500),
     _admin: User = Depends(require_role("admin")),
@@ -42,6 +46,8 @@ async def query_audit(
         study_id=study_id,
         action=action,
         actor_id=actor_id,
+        since=since,
+        until=until,
         before_id=before_id if isinstance(before_id, int) else None,
         limit=n,
     )

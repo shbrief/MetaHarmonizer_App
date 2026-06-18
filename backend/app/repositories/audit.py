@@ -79,6 +79,8 @@ async def list_audit_events(
     study_id: str | None = None,
     action: str | None = None,
     actor_id: int | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     before_id: int | None = None,
     limit: int = 50,
 ) -> list[AuditEvent]:
@@ -92,6 +94,10 @@ async def list_audit_events(
         stmt = stmt.where(AuditEvent.action == action)
     if actor_id is not None:
         stmt = stmt.where(AuditEvent.actor_id == actor_id)
+    if since is not None:
+        stmt = stmt.where(AuditEvent.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(AuditEvent.created_at <= until)
     if before_id is not None:
         stmt = stmt.where(AuditEvent.id < before_id)
 

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMemo, useRef, useState } from 'react';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import {
   Activity,
   Check,
@@ -13,35 +13,46 @@ import {
   UserCog,
   Power,
   LogOut,
+  Search,
+  ChevronDown,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { queryAudit } from '../api/client';
-import type { AuditEvent } from '../api/types';
+import { adminListUsers } from '../api/auth';
+import type { AuditEvent, User } from '../api/types';
 import PageHeader from '../components/ui/PageHeader';
 import { Card, CardBody } from '../components/ui/Card';
 import { EmptyState, LoadingBlock } from '../components/ui/Feedback';
 
-/** Human-readable verb + icon per audit action. */
-const ACTION_META: Record<string, { verb: string; icon: ReactNode; tone: string }> = {
-  accept: { verb: 'accepted a mapping', icon: <Check className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50' },
-  reject: { verb: 'rejected a mapping', icon: <X className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50' },
-  edit: { verb: 'edited a mapping', icon: <Pencil className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50' },
-  batch_accepted: { verb: 'batch-accepted mappings', icon: <Layers className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50' },
-  batch_rejected: { verb: 'batch-rejected mappings', icon: <Layers className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50' },
-  llm_rematch: { verb: 'ran an LLM rematch', icon: <Sparkles className="h-4 w-4" />, tone: 'text-purple-600 bg-purple-50' },
-  onto_accept: { verb: 'accepted an ontology term', icon: <Check className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50' },
-  onto_reject: { verb: 'rejected an ontology term', icon: <X className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50' },
-  onto_edit: { verb: 'edited an ontology term', icon: <Pencil className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50' },
-  study_delete: { verb: 'deleted a study', icon: <Trash2 className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50' },
-  study_complete: { verb: 'completed a study', icon: <CircleCheck className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50' },
-  admin_set_role: { verb: 'changed a user role', icon: <UserCog className="h-4 w-4" />, tone: 'text-indigo-600 bg-indigo-50' },
-  admin_approve_request: { verb: 'approved an admin request', icon: <ShieldCheck className="h-4 w-4" />, tone: 'text-indigo-600 bg-indigo-50' },
-  admin_reject_request: { verb: 'denied an admin request', icon: <ShieldCheck className="h-4 w-4" />, tone: 'text-slate-600 bg-slate-100' },
-  admin_set_active: { verb: 'changed account status', icon: <Power className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50' },
-  admin_force_logout: { verb: 'forced a sign-out', icon: <LogOut className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50' },
+/** Human-readable verb + icon + colour per audit action. */
+const ACTION_META: Record<string, { verb: string; icon: ReactNode; tone: string; dot: string }> = {
+  accept: { verb: 'Accepted a mapping', icon: <Check className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50', dot: 'bg-emerald-500' },
+  reject: { verb: 'Rejected a mapping', icon: <X className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50', dot: 'bg-rose-500' },
+  edit: { verb: 'Edited a mapping', icon: <Pencil className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50', dot: 'bg-amber-500' },
+  batch_accepted: { verb: 'Batch-accepted mappings', icon: <Layers className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50', dot: 'bg-emerald-500' },
+  batch_rejected: { verb: 'Batch-rejected mappings', icon: <Layers className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50', dot: 'bg-rose-500' },
+  llm_rematch: { verb: 'Ran an LLM rematch', icon: <Sparkles className="h-4 w-4" />, tone: 'text-purple-600 bg-purple-50', dot: 'bg-purple-500' },
+  onto_accept: { verb: 'Accepted an ontology term', icon: <Check className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50', dot: 'bg-emerald-500' },
+  onto_reject: { verb: 'Rejected an ontology term', icon: <X className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50', dot: 'bg-rose-500' },
+  onto_edit: { verb: 'Edited an ontology term', icon: <Pencil className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50', dot: 'bg-amber-500' },
+  study_delete: { verb: 'Deleted a study', icon: <Trash2 className="h-4 w-4" />, tone: 'text-rose-600 bg-rose-50', dot: 'bg-rose-500' },
+  study_complete: { verb: 'Completed a study', icon: <CircleCheck className="h-4 w-4" />, tone: 'text-emerald-600 bg-emerald-50', dot: 'bg-emerald-500' },
+  admin_set_role: { verb: 'Changed a user role', icon: <UserCog className="h-4 w-4" />, tone: 'text-indigo-600 bg-indigo-50', dot: 'bg-indigo-500' },
+  admin_approve_request: { verb: 'Approved an admin request', icon: <ShieldCheck className="h-4 w-4" />, tone: 'text-indigo-600 bg-indigo-50', dot: 'bg-indigo-500' },
+  admin_reject_request: { verb: 'Denied an admin request', icon: <ShieldCheck className="h-4 w-4" />, tone: 'text-slate-600 bg-slate-100', dot: 'bg-slate-400' },
+  admin_set_active: { verb: 'Changed account status', icon: <Power className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50', dot: 'bg-amber-500' },
+  admin_force_logout: { verb: 'Forced a sign-out', icon: <LogOut className="h-4 w-4" />, tone: 'text-amber-600 bg-amber-50', dot: 'bg-amber-500' },
 };
 
 const ACTION_OPTIONS = Object.keys(ACTION_META);
+
+const TIME_RANGES: { label: string; hours: number | null }[] = [
+  { label: 'All time', hours: null },
+  { label: 'Last hour', hours: 1 },
+  { label: 'Last 24 hours', hours: 24 },
+  { label: 'Last 7 days', hours: 24 * 7 },
+  { label: 'Last 30 days', hours: 24 * 30 },
+];
 
 function meta(action: string) {
   return (
@@ -49,11 +60,16 @@ function meta(action: string) {
       verb: action,
       icon: <Activity className="h-4 w-4" />,
       tone: 'text-slate-600 bg-slate-100',
+      dot: 'bg-slate-400',
     }
   );
 }
 
-function who(e: AuditEvent): string {
+function who(e: AuditEvent, usersById: Map<number, User>): string {
+  if (e.actor_id != null) {
+    const u = usersById.get(e.actor_id);
+    if (u) return u.name || u.email;
+  }
   return e.details?.curator ?? (e.actor_id != null ? `User #${e.actor_id}` : 'System');
 }
 
@@ -74,12 +90,27 @@ function timeLabel(iso: string): string {
 export default function ActivityPage() {
   const [action, setAction] = useState('');
   const [studyId, setStudyId] = useState('');
-  const [actorId, setActorId] = useState('');
+  const [actor, setActor] = useState<User | null>(null);
+  const [rangeIdx, setRangeIdx] = useState(0);
+
+  const usersQuery = useQuery({ queryKey: ['admin', 'users'], queryFn: adminListUsers });
+  const usersById = useMemo(() => {
+    const m = new Map<number, User>();
+    for (const u of usersQuery.data ?? []) m.set(u.id, u);
+    return m;
+  }, [usersQuery.data]);
+
+  const since = useMemo(() => {
+    const hrs = TIME_RANGES[rangeIdx].hours;
+    if (!hrs) return undefined;
+    return new Date(Date.now() - hrs * 3600_000).toISOString();
+  }, [rangeIdx]);
 
   const filters = {
     action: action || undefined,
     study_id: studyId.trim() || undefined,
-    actor_id: actorId.trim() ? Number(actorId.trim()) : undefined,
+    actor_id: actor?.id,
+    since,
   };
 
   const query = useInfiniteQuery({
@@ -89,12 +120,8 @@ export default function ActivityPage() {
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
 
-  const events = useMemo(
-    () => query.data?.pages.flatMap((p) => p.items) ?? [],
-    [query.data],
-  );
+  const events = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
 
-  // Group events by day for readable scanning.
   const groups = useMemo(() => {
     const map = new Map<string, AuditEvent[]>();
     for (const e of events) {
@@ -109,9 +136,10 @@ export default function ActivityPage() {
   const clearFilters = () => {
     setAction('');
     setStudyId('');
-    setActorId('');
+    setActor(null);
+    setRangeIdx(0);
   };
-  const hasFilters = !!(action || studyId || actorId);
+  const hasFilters = !!(action || studyId || actor || rangeIdx);
 
   return (
     <div className="space-y-5">
@@ -123,17 +151,34 @@ export default function ActivityPage() {
       {/* Filters */}
       <Card>
         <CardBody className="flex flex-wrap items-end gap-3">
+          {/* Action — with icon + colour per option */}
+          <ActionFilter value={action} onChange={setAction} />
+
+          {/* User — searchable picker over existing users/admins */}
+          <UserFilter
+            users={usersQuery.data ?? []}
+            loading={usersQuery.isLoading}
+            value={actor}
+            onChange={setActor}
+          />
+
+          {/* Time range */}
           <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-            Action
-            <select value={action} onChange={(e) => setAction(e.target.value)} className="field !py-2">
-              <option value="">All actions</option>
-              {ACTION_OPTIONS.map((a) => (
-                <option key={a} value={a}>
-                  {meta(a).verb}
+            When
+            <select
+              value={rangeIdx}
+              onChange={(e) => setRangeIdx(Number(e.target.value))}
+              className="field !py-2"
+            >
+              {TIME_RANGES.map((r, i) => (
+                <option key={r.label} value={i}>
+                  {r.label}
                 </option>
               ))}
             </select>
           </label>
+
+          {/* Study id */}
           <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
             Study ID
             <input
@@ -143,15 +188,7 @@ export default function ActivityPage() {
               className="field !py-2"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
-            User ID
-            <input
-              value={actorId}
-              onChange={(e) => setActorId(e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="numeric"
-              className="field !w-28 !py-2"
-            />
-          </label>
+
           {hasFilters && (
             <button onClick={clearFilters} className="btn btn-sm border border-slate-200 text-slate-600 hover:bg-slate-50">
               Clear
@@ -185,7 +222,7 @@ export default function ActivityPage() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="text-sm text-slate-800">
-                            <span className="font-semibold">{who(e)}</span> {m.verb}
+                            <span className="font-semibold">{who(e, usersById)}</span> · {m.verb.toLowerCase()}
                             {e.new_value && <span className="text-slate-500"> · {e.new_value}</span>}
                           </p>
                           <p className="text-xs text-slate-400">
@@ -215,5 +252,167 @@ export default function ActivityPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ---------- Action filter (icon + colour dropdown) ---------- */
+
+function ActionFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const current = value ? meta(value) : null;
+  return (
+    <div className="relative">
+      <span className="mb-1 block text-xs font-medium text-slate-600">Action</span>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        className="field flex !w-56 items-center justify-between gap-2 !py-2 text-left"
+      >
+        <span className="flex items-center gap-2 truncate">
+          {current ? (
+            <>
+              <span className={`h-2.5 w-2.5 rounded-full ${current.dot}`} />
+              {current.verb}
+            </>
+          ) : (
+            <span className="text-slate-500">All actions</span>
+          )}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-72 w-64 overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+          <button
+            type="button"
+            onMouseDown={() => { onChange(''); setOpen(false); }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+            All actions
+          </button>
+          {ACTION_OPTIONS.map((a) => {
+            const m = meta(a);
+            return (
+              <button
+                key={a}
+                type="button"
+                onMouseDown={() => { onChange(a); setOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <span className={`grid h-6 w-6 place-items-center rounded ${m.tone}`}>{m.icon}</span>
+                {m.verb}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- User filter (searchable picker) ---------- */
+
+function UserFilter({
+  users,
+  loading,
+  value,
+  onChange,
+}: {
+  users: User[];
+  loading: boolean;
+  value: User | null;
+  onChange: (u: User | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return users;
+    return users.filter(
+      (u) => (u.name ?? '').toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle),
+    );
+  }, [users, q]);
+
+  return (
+    <div className="relative">
+      <span className="mb-1 block text-xs font-medium text-slate-600">User</span>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          window.setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        className="field flex !w-56 items-center justify-between gap-2 !py-2 text-left"
+      >
+        <span className="truncate">
+          {value ? (
+            <span className="flex items-center gap-2">
+              <Avatar user={value} />
+              {value.name || value.email}
+            </span>
+          ) : (
+            <span className="text-slate-500">Everyone</span>
+          )}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-64 rounded-xl border border-slate-200 bg-white shadow-lg">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search name or email…"
+              className="w-full text-sm outline-none"
+            />
+          </div>
+          <div className="max-h-64 overflow-auto py-1">
+            <button
+              type="button"
+              onMouseDown={() => { onChange(null); setOpen(false); }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              Everyone
+            </button>
+            {loading && <p className="px-3 py-2 text-xs text-slate-400">Loading users…</p>}
+            {!loading && filtered.length === 0 && (
+              <p className="px-3 py-2 text-xs text-slate-400">No users match.</p>
+            )}
+            {filtered.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onMouseDown={() => { onChange(u); setOpen(false); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Avatar user={u} />
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{u.name || u.email}</span>
+                  <span className="block truncate text-xs text-slate-400">
+                    {u.email} · {u.role}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Avatar({ user }: { user: User }) {
+  const initials = (user.name || user.email).slice(0, 2).toUpperCase();
+  const tone = user.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-primary-100 text-primary-700';
+  return (
+    <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold ${tone}`}>
+      {initials}
+    </span>
   );
 }

@@ -170,6 +170,8 @@ export async function queryAudit(params: {
     action?: string;
     study_id?: string;
     actor_id?: number;
+    since?: string;
+    until?: string;
     cursor?: string;
     limit?: number;
 }): Promise<Paginated<AuditEvent>> {
@@ -177,6 +179,8 @@ export async function queryAudit(params: {
     if (params.action) qs.set('action', params.action);
     if (params.study_id) qs.set('study_id', params.study_id);
     if (params.actor_id != null) qs.set('actor_id', String(params.actor_id));
+    if (params.since) qs.set('since', params.since);
+    if (params.until) qs.set('until', params.until);
     if (params.cursor) qs.set('cursor', params.cursor);
     if (params.limit) qs.set('limit', String(params.limit));
     const q = qs.toString();
