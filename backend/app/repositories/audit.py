@@ -43,12 +43,17 @@ async def add_audit_entry(
     mapping_id: int | None = None,
     old_value: str | None = None,
     new_value: str | None = None,
-    curator: str = "curator",
+    actor_id: int | None = None,
+    curator: str | None = None,
 ) -> None:
+    """Record one decision. ``actor_id`` is the authoritative "who" (the user's
+    id, used by admin oversight); ``curator`` is an optional display label kept
+    in ``details`` for human-readable rows."""
     db.add(
         AuditEvent(
             study_id=study_id,
             action=action,
+            actor_id=actor_id,
             mapping_id=mapping_id,
             old_value=old_value,
             new_value=new_value,

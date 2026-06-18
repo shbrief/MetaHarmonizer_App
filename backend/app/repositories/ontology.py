@@ -64,7 +64,7 @@ async def update_ontology_mapping(
     status: str,
     curator_term: str | None = None,
     curator_id: str | None = None,
-    reviewed_by: str = "curator",
+    reviewed_by: int | None = None,
 ) -> dict | None:
     """Curator override for an ontology value mapping. When the curator assigns
     a term it's a confirmed human decision, so confidence is set to 1.0 (an
@@ -75,6 +75,7 @@ async def update_ontology_mapping(
         return None
     o.status = status
     o.reviewed_at = datetime.now(timezone.utc)
+    o.reviewed_by = reviewed_by
     if curator_term:
         o.curator_term = curator_term
         o.curator_id = curator_id

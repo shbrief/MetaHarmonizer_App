@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from rapidfuzz import fuzz, process
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_role
+from app.core.deps import actor_label as _actor_label, require_role
 from app.db.session import get_db
 from app.models import OntologyEditRequest, OntologyMappingOut, OntologySearchResult
 from app.repositories import audit as audit_repo
@@ -211,11 +211,13 @@ async def suggest_ontology_terms(
 @router.post("/mappings/{mapping_id}/accept", response_model=OntologyMappingOut)
 async def accept_ontology_mapping(
     mapping_id: int,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Accept the automated ontology term assignment."""
-    result = await ontology_repo.update_ontology_mapping(db, mapping_id, status="accepted")
+    result = await ontology_repo.update_ontology_mapping(
+        db, mapping_id, status="accepted", reviewed_by=user.id
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Ontology mapping not found")
     await audit_repo.add_audit_entry(
@@ -225,6 +227,8 @@ async def accept_ontology_mapping(
         mapping_id=mapping_id,
         old_value="pending",
         new_value="accepted",
+        actor_id=user.id,
+        curator=_actor_label(user),
     )
     await db.commit()
     return result
@@ -233,11 +237,13 @@ async def accept_ontology_mapping(
 @router.post("/mappings/{mapping_id}/reject", response_model=OntologyMappingOut)
 async def reject_ontology_mapping(
     mapping_id: int,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Reject the automated ontology term assignment."""
-    result = await ontology_repo.update_ontology_mapping(db, mapping_id, status="rejected")
+    result = await ontology_repo.update_ontology_mapping(
+        db, mapping_id, status="rejected", reviewed_by=user.id
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Ontology mapping not found")
     await audit_repo.add_audit_entry(
@@ -247,6 +253,8 @@ async def reject_ontology_mapping(
         mapping_id=mapping_id,
         old_value="pending",
         new_value="rejected",
+        actor_id=user.id,
+        curator=_actor_label(user),
     )
     await db.commit()
     return result
@@ -256,7 +264,7 @@ async def reject_ontology_mapping(
 async def edit_ontology_mapping(
     mapping_id: int,
     body: OntologyEditRequest,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -279,6 +287,7 @@ async def edit_ontology_mapping(
         status="accepted",
         curator_term=body.new_term,
         curator_id=resolved_id,
+        reviewed_by=user.id,
     )
     if not result:
         raise HTTPException(status_code=404, detail="Ontology mapping not found")
@@ -290,6 +299,8 @@ async def edit_ontology_mapping(
         mapping_id=mapping_id,
         old_value=result.get("ontology_term"),
         new_value=body.new_term,
+        actor_id=user.id,
+        curator=_actor_label(user),
     )
     await db.commit()
     return result

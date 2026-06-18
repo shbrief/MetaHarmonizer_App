@@ -11,7 +11,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import require_role
 from app.core.pagination import Page, build_page, clamp_limit, decode_cursor
+from app.db.models import User
 from app.db.session import get_db
 from app.repositories.audit import list_audit_events
 from app.schemas.audit import AuditEventOut
@@ -26,9 +28,13 @@ async def query_audit(
     actor_id: int | None = Query(default=None),
     cursor: str | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1, le=500),
+    _admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ) -> Page[AuditEventOut]:
-    """List audit events newest-first. ``cursor`` continues a previous page."""
+    """List audit events newest-first. ``cursor`` continues a previous page.
+
+    Admin-only: the audit log spans every user's decisions, so it's an
+    oversight surface restricted to admins."""
     n = clamp_limit(limit)
     before_id = decode_cursor(cursor)
     rows = await list_audit_events(

@@ -12,10 +12,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import ForbiddenError, require_role
+from app.core.deps import ForbiddenError, actor_label, require_role
 from app.core.errors import NotFoundError
 from app.db.models import User
 from app.db.session import get_db
+from app.repositories import audit as audit_repo
 from app.repositories import sessions as sessions_repo
 from app.repositories import users as users_repo
 from app.schemas.auth import ActiveUpdate, RoleUpdate, UserOut
@@ -46,7 +47,17 @@ async def set_role(
         # Guard against an admin accidentally demoting themselves and locking
         # everyone out; promotion of others is fine.
         raise ForbiddenError("You cannot remove your own admin role.")
+    old_role = user.role
     user.role = body.role
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=None,
+        action="admin_set_role",
+        old_value=f"user {user_id}: {old_role}",
+        new_value=body.role,
+        actor_id=admin.id,
+        curator=actor_label(admin),
+    )
     await db.commit()
     await db.refresh(user)
     return UserOut.model_validate(user)
@@ -55,7 +66,7 @@ async def set_role(
 @router.post("/users/{user_id}/approve-admin", response_model=UserOut)
 async def approve_admin_request(
     user_id: int,
-    _admin: User = Depends(require_role("admin")),
+    admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ) -> UserOut:
     """Approve a pending admin-access request: promote the user to admin."""
@@ -64,6 +75,14 @@ async def approve_admin_request(
         raise NotFoundError("User not found.")
     user.role = "admin"
     user.admin_requested = False
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=None,
+        action="admin_approve_request",
+        new_value=f"user {user_id} -> admin",
+        actor_id=admin.id,
+        curator=actor_label(admin),
+    )
     await db.commit()
     await db.refresh(user)
     return UserOut.model_validate(user)
@@ -72,7 +91,7 @@ async def approve_admin_request(
 @router.post("/users/{user_id}/reject-admin", response_model=UserOut)
 async def reject_admin_request(
     user_id: int,
-    _admin: User = Depends(require_role("admin")),
+    admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ) -> UserOut:
     """Reject a pending admin-access request: clear the flag, keep curator role."""
@@ -80,6 +99,14 @@ async def reject_admin_request(
     if not user:
         raise NotFoundError("User not found.")
     user.admin_requested = False
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=None,
+        action="admin_reject_request",
+        new_value=f"user {user_id} request denied",
+        actor_id=admin.id,
+        curator=actor_label(admin),
+    )
     await db.commit()
     await db.refresh(user)
     return UserOut.model_validate(user)
@@ -101,6 +128,14 @@ async def set_active(
     if not body.is_active:
         # Disabling an account also ends all of its sessions.
         await sessions_repo.revoke_all_for_user(db, user_id)
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=None,
+        action="admin_set_active",
+        new_value=f"user {user_id}: {'enabled' if body.is_active else 'disabled'}",
+        actor_id=admin.id,
+        curator=actor_label(admin),
+    )
     await db.commit()
     await db.refresh(user)
     return UserOut.model_validate(user)
@@ -109,7 +144,7 @@ async def set_active(
 @router.post("/users/{user_id}/logout", status_code=204)
 async def force_logout(
     user_id: int,
-    _admin: User = Depends(require_role("admin")),
+    admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke every active session for a user (force sign-out everywhere)."""
@@ -117,4 +152,12 @@ async def force_logout(
     if not user:
         raise NotFoundError("User not found.")
     await sessions_repo.revoke_all_for_user(db, user_id)
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=None,
+        action="admin_force_logout",
+        new_value=f"user {user_id}",
+        actor_id=admin.id,
+        curator=actor_label(admin),
+    )
     await db.commit()

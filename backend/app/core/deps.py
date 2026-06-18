@@ -111,6 +111,11 @@ def require_role(minimum: str):
     return _checker
 
 
+def actor_label(user: User) -> str:
+    """Human-readable label for audit rows (the user's name, else email)."""
+    return getattr(user, "name", None) or getattr(user, "email", None) or "user"
+
+
 def require_scope(scope: str):
     """Return a dependency requiring a token scope (``read`` < ``write``).
 

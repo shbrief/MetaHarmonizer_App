@@ -77,7 +77,7 @@ async def update_mapping_status(
     status: str,
     curator_field: str | None = None,
     curator_note: str | None = None,
-    reviewed_by: str = "curator",
+    reviewed_by: int | None = None,
 ) -> dict | None:
     m = await db.get(Mapping, mapping_id)
     if not m:
@@ -86,12 +86,13 @@ async def update_mapping_status(
     m.curator_field = curator_field
     m.curator_note = curator_note
     m.reviewed_at = datetime.now(timezone.utc)
+    m.reviewed_by = reviewed_by
     await db.flush()
     return _to_dict(m)
 
 
 async def batch_update_mapping_status(
-    db: AsyncSession, mapping_ids: list[int], status: str
+    db: AsyncSession, mapping_ids: list[int], status: str, reviewed_by: int | None = None
 ) -> int:
     if not mapping_ids:
         return 0
@@ -99,7 +100,7 @@ async def batch_update_mapping_status(
     res = await db.execute(
         update(Mapping)
         .where(Mapping.id.in_(mapping_ids))
-        .values(status=status, reviewed_at=now)
+        .values(status=status, reviewed_at=now, reviewed_by=reviewed_by)
     )
     return res.rowcount or 0
 

@@ -12,7 +12,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_role
+from app.core.deps import actor_label as _actor_label, require_role
 from app.db.session import get_db
 from app.models import (
     BatchUpdateRequest,
@@ -40,7 +40,7 @@ async def get_study_mappings(study_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/{mapping_id}/accept", response_model=MappingOut)
 async def accept_mapping(
     mapping_id: int,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Accept an automated mapping."""
@@ -49,7 +49,9 @@ async def accept_mapping(
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     old_status = mapping["status"]
-    result = await mappings_repo.update_mapping_status(db, mapping_id, "accepted")
+    result = await mappings_repo.update_mapping_status(
+        db, mapping_id, "accepted", reviewed_by=user.id
+    )
 
     await audit_repo.add_audit_entry(
         db,
@@ -58,6 +60,8 @@ async def accept_mapping(
         mapping_id=mapping_id,
         old_value=old_status,
         new_value="accepted",
+        actor_id=user.id,
+        curator=_actor_label(user),
     )
     await db.commit()
     return result
@@ -66,7 +70,7 @@ async def accept_mapping(
 @router.post("/{mapping_id}/reject", response_model=MappingOut)
 async def reject_mapping(
     mapping_id: int,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Reject an automated mapping."""
@@ -75,7 +79,9 @@ async def reject_mapping(
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     old_status = mapping["status"]
-    result = await mappings_repo.update_mapping_status(db, mapping_id, "rejected")
+    result = await mappings_repo.update_mapping_status(
+        db, mapping_id, "rejected", reviewed_by=user.id
+    )
 
     await audit_repo.add_audit_entry(
         db,
@@ -84,6 +90,8 @@ async def reject_mapping(
         mapping_id=mapping_id,
         old_value=old_status,
         new_value="rejected",
+        actor_id=user.id,
+        curator=_actor_label(user),
     )
     await db.commit()
     return result
@@ -93,7 +101,7 @@ async def reject_mapping(
 async def edit_mapping(
     mapping_id: int,
     body: MappingEditRequest,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Curator manually edits a mapping to a different field."""
@@ -108,6 +116,7 @@ async def edit_mapping(
         status="accepted",
         curator_field=body.new_field,
         curator_note=body.note,
+        reviewed_by=user.id,
     )
 
     await audit_repo.add_audit_entry(
@@ -117,6 +126,8 @@ async def edit_mapping(
         mapping_id=mapping_id,
         old_value=old_field,
         new_value=body.new_field,
+        actor_id=user.id,
+        curator=_actor_label(user),
     )
     await db.commit()
     return result
@@ -125,7 +136,7 @@ async def edit_mapping(
 @router.post("/batch", response_model=BatchUpdateResponse)
 async def batch_update_mappings(
     body: BatchUpdateRequest,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Batch accept or reject multiple mappings."""
@@ -133,7 +144,7 @@ async def batch_update_mappings(
         raise HTTPException(status_code=400, detail="No mapping IDs provided")
 
     updated = await mappings_repo.batch_update_mapping_status(
-        db, body.mapping_ids, body.action
+        db, body.mapping_ids, body.action, reviewed_by=user.id
     )
 
     # Audit log for batch
@@ -146,6 +157,8 @@ async def batch_update_mappings(
                 action=f"batch_{body.action}",
                 old_value=f"{len(body.mapping_ids)} mappings",
                 new_value=body.action,
+                actor_id=user.id,
+                curator=_actor_label(user),
             )
 
     await db.commit()
@@ -159,7 +172,7 @@ async def batch_update_mappings(
 @router.post("/{mapping_id}/llm")
 async def llm_rematch(
     mapping_id: int,
-    _curator=Depends(require_role("curator")),
+    user=Depends(require_role("curator")),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -194,6 +207,8 @@ async def llm_rematch(
         mapping_id=mapping_id,
         old_value=mapping.get("matched_field"),
         new_value=suggestions[0]["field"] if suggestions else None,
+        actor_id=user.id,
+        curator=_actor_label(user),
     )
     await db.commit()
 
