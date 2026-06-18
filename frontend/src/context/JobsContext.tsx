@@ -32,6 +32,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuth } from './AuthContext';
+import { useNotifications } from './NotificationsContext';
 import { cancelJob as apiCancelJob, getJobStatus } from '../api/jobs';
 
 export type JobPhase = 'queued' | 'processing' | 'done' | 'failed' | 'cancelled';
@@ -127,6 +128,7 @@ function reconcile(prev: TrackedJob, status: Awaited<ReturnType<typeof getJobSta
 
 export function JobsProvider({ children }: { children: ReactNode }) {
     const { isAuthenticated, user } = useAuth();
+    const { notify } = useNotifications();
     const userId = user?.id ?? null;
     const qc = useQueryClient();
     const [jobs, setJobs] = useState<TrackedJob[]>(() => loadPersisted(storageKey(userId)));
@@ -229,16 +231,32 @@ export function JobsProvider({ children }: { children: ReactNode }) {
                 return next;
             });
 
-            // Side effects for newly-finished jobs (toast + cache refresh).
+            // Side effects for newly-finished jobs (toast + bell + cache refresh).
             for (const job of justFinished) {
                 if (job.phase === 'done') {
                     toast.success(`Harmonization complete — ${job.studyName}`);
+                    notify({
+                        kind: 'job_done',
+                        title: 'Harmonization complete',
+                        body: `${job.studyName} is ready for review.`,
+                        href: `/review/${job.studyId}`,
+                    });
                     qc.invalidateQueries({ queryKey: ['studies'] });
                     qc.invalidateQueries({ queryKey: ['overview'] });
                 } else if (job.phase === 'failed') {
                     toast.error(`Harmonization failed — ${job.studyName}`);
+                    notify({
+                        kind: 'job_failed',
+                        title: 'Harmonization failed',
+                        body: `${job.studyName} could not be harmonized. Please try again.`,
+                    });
                 } else if (job.phase === 'cancelled') {
                     toast(`Harmonization cancelled — ${job.studyName}`);
+                    notify({
+                        kind: 'job_cancelled',
+                        title: 'Harmonization cancelled',
+                        body: `${job.studyName} was cancelled.`,
+                    });
                 }
             }
         };
@@ -250,7 +268,7 @@ export function JobsProvider({ children }: { children: ReactNode }) {
             stopped = true;
             clearInterval(id);
         };
-    }, [isAuthenticated, qc]);
+    }, [isAuthenticated, qc, notify]);
 
     const value = useMemo<JobsContextValue>(
         () => ({

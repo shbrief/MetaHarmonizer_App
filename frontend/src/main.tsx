@@ -6,6 +6,7 @@ import { Toaster } from 'sonner';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { JobsProvider } from './context/JobsContext';
+import { NotificationsProvider } from './context/NotificationsContext';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -24,9 +25,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <JobsProvider>
-            <App />
-          </JobsProvider>
+          <NotificationsProvider>
+            <JobsProvider>
+              <App />
+            </JobsProvider>
+          </NotificationsProvider>
           <Toaster
             position="top-right"
             richColors

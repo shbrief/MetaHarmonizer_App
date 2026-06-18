@@ -3,6 +3,7 @@ import { LayoutDashboard, Upload, Table2, BarChart3, Download, Microscope, Shiel
 import { lazy, Suspense, type ReactNode } from 'react';
 import Brand from './components/Brand';
 import UserMenu from './components/UserMenu';
+import NotificationBell from './components/NotificationBell';
 import ProtectedRoute from './components/ProtectedRoute';
 import ProcessingTray from './components/ProcessingTray';
 import { LoadingBlock } from './components/ui/Feedback';
@@ -71,7 +72,10 @@ function TopNav() {
           )}
         </nav>
 
-        <UserMenu />
+        <div className="flex items-center gap-2">
+          <NotificationBell />
+          <UserMenu />
+        </div>
       </div>
 
       {/* Mobile nav */}
