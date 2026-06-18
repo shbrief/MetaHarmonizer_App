@@ -338,13 +338,26 @@ def update_ontology_mapping(
     conn.commit()
 
     now = datetime.now(timezone.utc).isoformat()
-    conn.execute(
-        """UPDATE ontology_mappings
-           SET status = ?, curator_term = ?, curator_id = ?,
-               reviewed_at = ?, reviewed_by = ?
-           WHERE id = ?""",
-        (status, curator_term, curator_id, now, reviewed_by, mapping_id),
-    )
+    if curator_term:
+        # A curator explicitly assigned/overrode the term — that's a confirmed,
+        # human decision, so record full confidence (the engine score of an
+        # unmatched value was 0, which would otherwise show as "0%" after
+        # approval and look broken).
+        conn.execute(
+            """UPDATE ontology_mappings
+               SET status = ?, curator_term = ?, curator_id = ?,
+                   confidence_score = 1.0, reviewed_at = ?, reviewed_by = ?
+               WHERE id = ?""",
+            (status, curator_term, curator_id, now, reviewed_by, mapping_id),
+        )
+    else:
+        # Plain accept/reject of the engine's own suggestion — keep its score.
+        conn.execute(
+            """UPDATE ontology_mappings
+               SET status = ?, reviewed_at = ?, reviewed_by = ?
+               WHERE id = ?""",
+            (status, now, reviewed_by, mapping_id),
+        )
     conn.commit()
     row = conn.execute(
         "SELECT * FROM ontology_mappings WHERE id = ?", (mapping_id,)
