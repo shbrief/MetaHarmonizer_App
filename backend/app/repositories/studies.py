@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Study
 
-# A study with no explicit "completed" mark is treated as scratch work and is
-# deleted once it's older than this, lazily on the owner's next list/overview.
+# A study the user never completed is treated as abandoned in-progress work and
+# is deleted once it's older than this, lazily on the owner's next list/overview.
 IDLE_STUDY_DAYS = 7
 
 
@@ -72,9 +72,9 @@ async def list_studies(db: AsyncSession, owner_id: int | None = None) -> list[di
     (per-user visibility); pass ``None`` for the global view.
 
     Lazily enforces the idle-expiry policy first: a user's studies older than
-    ``IDLE_STUDY_DAYS`` are deleted unless they were marked ``completed`` (an
-    explicit "keep this" signal). Cleanup runs on the owner's own list/overview
-    load, so no scheduler is required for it to take effect."""
+    ``IDLE_STUDY_DAYS`` are deleted (completing a study removes it immediately,
+    so anything still here is in-progress). Cleanup runs on the owner's own
+    list/overview load, so no scheduler is required for it to take effect."""
     if owner_id is not None:
         await purge_idle_studies(db, owner_id)
     stmt = select(Study).order_by(Study.created_at.desc())
@@ -85,23 +85,13 @@ async def list_studies(db: AsyncSession, owner_id: int | None = None) -> list[di
 
 async def mark_exported(db: AsyncSession, study_id: str) -> None:
     """Flag a study as exported. Purely informational now (studies persist until
-    the user deletes them or they idle-expire); kept so exports are recorded."""
+    the user completes/removes them or they idle-expire); kept so exports are
+    recorded."""
     await db.execute(update(Study).where(Study.id == study_id).values(exported=True))
 
 
 async def update_status(db: AsyncSession, study_id: str, status: str) -> None:
     await db.execute(update(Study).where(Study.id == study_id).values(status=status))
-
-
-async def mark_completed(db: AsyncSession, study_id: str) -> dict | None:
-    """Mark a study ``completed`` — a "keep this" signal that also exempts it
-    from idle-expiry. The study stays fully viewable and exportable."""
-    s = await db.get(Study, study_id)
-    if not s:
-        return None
-    s.status = "completed"
-    await db.flush()
-    return _to_dict(s)
 
 
 async def delete_study(db: AsyncSession, study_id: str) -> bool:
@@ -112,13 +102,13 @@ async def delete_study(db: AsyncSession, study_id: str) -> bool:
 
 
 async def purge_idle_studies(db: AsyncSession, owner_id: int) -> int:
-    """Delete a user's studies older than ``IDLE_STUDY_DAYS`` that were never
-    marked ``completed``. Returns the number removed."""
+    """Delete a user's studies older than ``IDLE_STUDY_DAYS``. Returns the
+    number removed. (Completing a study deletes it outright, so this only ever
+    sweeps in-progress work the user walked away from.)"""
     cutoff = datetime.now(timezone.utc) - timedelta(days=IDLE_STUDY_DAYS)
     res = await db.execute(
         delete(Study).where(
             Study.owner_id == owner_id,
-            Study.status != "completed",
             Study.created_at < cutoff,
         )
     )

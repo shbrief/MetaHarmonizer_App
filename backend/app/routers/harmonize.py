@@ -192,29 +192,3 @@ async def delete_study(
         curator=actor_label(user),
     )
     await db.commit()
-
-
-@router.post("/studies/{study_id}/complete", response_model=StudyOut)
-async def complete_study(
-    study_id: str,
-    user=Depends(require_role("curator")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Mark a study completed: keeps it (exempt from idle-expiry), still
-    viewable and exportable."""
-    study = await studies_repo.get_study(db, study_id)
-    if not study:
-        raise HTTPException(status_code=404, detail="Study not found")
-    if study.get("owner_id") not in (None, getattr(user, "id", None)):
-        raise HTTPException(status_code=403, detail="Not your study")
-    result = await studies_repo.mark_completed(db, study_id)
-    await audit_repo.add_audit_entry(
-        db,
-        study_id=study_id,
-        action="study_complete",
-        new_value=study.get("name"),
-        actor_id=user.id,
-        curator=actor_label(user),
-    )
-    await db.commit()
-    return result

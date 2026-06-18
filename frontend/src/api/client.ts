@@ -42,10 +42,6 @@ export async function deleteStudy(id: string): Promise<void> {
     await request<void>(`${BASE}/studies/${id}`, { method: 'DELETE' });
 }
 
-export async function completeStudy(id: string): Promise<Study> {
-    return request<Study>(`${BASE}/studies/${id}/complete`, { method: 'POST' });
-}
-
 /* ---------- Harmonize ---------- */
 
 export async function uploadAndHarmonize(file: File): Promise<HarmonizeAccepted> {

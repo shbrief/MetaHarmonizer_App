@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { FileSpreadsheet, ArrowRight, Trash2, CircleCheck, CheckCircle2 } from 'lucide-react';
+import { FileSpreadsheet, ArrowRight, CircleCheck, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Study } from '../api/types';
 import { Card } from './ui/Card';
 import Badge from './ui/Badge';
-import { useCompleteStudy, useDeleteStudy } from '../hooks/queries';
+import { useDeleteStudy } from '../hooks/queries';
 
 const CONFETTI = ['#22c55e', '#16a34a', '#86efac', '#4ade80', '#bbf7d0', '#34d399'];
 
@@ -39,34 +39,26 @@ function Confetti() {
 }
 
 /** Study card used in the picker list, with a celebratory delete + a
- *  "mark completed" action. Checking Delete turns the card green, pops a
- *  confetti burst, then the card vanishes as the study is removed. */
+ *  Checking "Complete" turns the card green, pops a confetti burst, then the
+ *  card vanishes as the study is removed. Studies left incomplete are
+ *  auto-removed after a week. */
 export default function StudyListCard({ study, basePath }: { study: Study; basePath: string }) {
   const navigate = useNavigate();
   const del = useDeleteStudy();
-  const complete = useCompleteStudy();
   const [celebrating, setCelebrating] = useState(false);
-  const isCompleted = study.status === 'completed';
 
-  const startDelete = () => {
+  const onComplete = () => {
     if (celebrating) return;
     setCelebrating(true);
-    // Let the celebration play, then actually delete (removal animates the exit).
+    // Let the celebration play, then remove the study (the exit animates).
     window.setTimeout(() => {
       del.mutate(study.id, {
         onError: () => {
           setCelebrating(false);
-          toast.error('Could not delete study');
+          toast.error('Could not complete study');
         },
       });
     }, 850);
-  };
-
-  const onComplete = () => {
-    complete.mutate(study.id, {
-      onSuccess: () => toast.success('Study marked completed'),
-      onError: () => toast.error('Could not update study'),
-    });
   };
 
   return (
@@ -111,11 +103,7 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
               <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span>{study.row_count ?? '—'} rows</span>·
                 <span>{study.column_count ?? '—'} columns</span>
-                {isCompleted ? (
-                  <Badge tone="green">completed</Badge>
-                ) : (
-                  study.status && <Badge tone="slate">{study.status}</Badge>
-                )}
+                {study.status && <Badge tone="slate">{study.status}</Badge>}
               </p>
               {study.upload_date && (
                 <p className="mt-0.5 text-[11px] text-slate-400">Uploaded {timeAgo(study.upload_date)}</p>
@@ -125,28 +113,25 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
           <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-primary-500" />
         </button>
 
-        {/* Action footer */}
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2">
-          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-rose-600 hover:text-rose-700">
+        {/* Action footer — completing removes the study (auto-removed after a
+            week otherwise). */}
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-2">
+          <p className="text-[11px] text-slate-400">
+            Completing removes this study. Left alone, it auto-deletes in a week.
+          </p>
+          <label
+            className="flex shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-emerald-600 hover:text-emerald-700"
+            title="Mark complete and remove this study"
+          >
             <input
               type="checkbox"
               checked={celebrating}
-              onChange={startDelete}
-              className="h-3.5 w-3.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+              onChange={onComplete}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
             />
-            <Trash2 className="h-3.5 w-3.5" />
-            Delete
+            <CircleCheck className="h-3.5 w-3.5" />
+            Complete
           </label>
-          {!isCompleted && (
-            <button
-              onClick={onComplete}
-              disabled={complete.isPending}
-              className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
-            >
-              <CircleCheck className="h-3.5 w-3.5" />
-              Mark completed
-            </button>
-          )}
         </div>
       </Card>
     </motion.div>

@@ -1,8 +1,8 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { Download, FileText, Database, FileJson, Trash2, CircleCheck } from 'lucide-react';
+import { Download, FileText, Database, FileJson, CircleCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { getExportUrl } from '../api/client';
-import { useCompleteStudy, useDeleteStudy, useStudies } from '../hooks/queries';
+import { useDeleteStudy, useStudies } from '../hooks/queries';
 import PageHeader from '../components/ui/PageHeader';
 import { Card, CardBody } from '../components/ui/Card';
 import StudyPicker from '../components/StudyPicker';
@@ -12,7 +12,6 @@ export default function ExportPage() {
   const navigate = useNavigate();
   const { data: studies, isLoading } = useStudies();
   const del = useDeleteStudy();
-  const complete = useCompleteStudy();
 
   if (!studyId) {
     return (
@@ -52,25 +51,14 @@ export default function ExportPage() {
     },
   ];
 
-  const isCompleted = study?.status === 'completed';
-
-  const onDelete = () => {
-    if (!studyId) return;
-    if (!window.confirm('Delete this study and all its mappings? This cannot be undone.')) return;
-    del.mutate(studyId, {
-      onSuccess: () => {
-        toast.success('Study deleted');
-        navigate('/export');
-      },
-      onError: () => toast.error('Could not delete study'),
-    });
-  };
-
   const onComplete = () => {
     if (!studyId) return;
-    complete.mutate(studyId, {
-      onSuccess: () => toast.success('Study marked completed'),
-      onError: () => toast.error('Could not update study'),
+    del.mutate(studyId, {
+      onSuccess: () => {
+        toast.success('Study completed and removed');
+        navigate('/export');
+      },
+      onError: () => toast.error('Could not complete study'),
     });
   };
 
@@ -108,31 +96,20 @@ export default function ExportPage() {
         ))}
       </div>
 
-      {/* Study lifecycle actions */}
-      <div className="mt-6 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      {/* Study lifecycle action — completing removes the study */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
         <p className="text-xs text-slate-500">
-          Studies you keep are auto-removed after a week of inactivity unless marked completed.
+          Completing removes this study and its mappings. Studies left incomplete are
+          auto-removed after a week.
         </p>
-        <div className="flex items-center gap-2">
-          {!isCompleted && (
-            <button
-              onClick={onComplete}
-              disabled={complete.isPending}
-              className="btn btn-sm border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-            >
-              <CircleCheck className="h-4 w-4" />
-              Mark completed
-            </button>
-          )}
-          <button
-            onClick={onDelete}
-            disabled={del.isPending}
-            className="btn-danger btn-sm disabled:opacity-50"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete study
-          </button>
-        </div>
+        <button
+          onClick={onComplete}
+          disabled={del.isPending}
+          className="btn btn-sm border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+        >
+          <CircleCheck className="h-4 w-4" />
+          Complete & remove
+        </button>
       </div>
     </div>
   );
