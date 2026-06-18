@@ -35,7 +35,7 @@ export default function StudyPicker({
           title="No studies yet"
           description="Upload a metadata file to start harmonizing."
           action={
-            <Button icon={<Upload className="h-4 w-4" />} onClick={() => navigate('/')}>
+            <Button icon={<Upload className="h-4 w-4" />} onClick={() => navigate('/upload')}>
               Upload a file
             </Button>
           }
