@@ -31,21 +31,25 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.errors import error_envelope
 from app.core.redis import get_redis
+from app.core.settings import settings
 
 logger = logging.getLogger("app.ratelimit")
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 IDEMPOTENT_ROUTES = ("/studies", "/harmonize", "/federation/import")
 IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 
-# (limit, window_seconds)
-AUTH_LIMIT = (60, 60)
-ANON_LIMIT = (10, 60)
-
-# Paths exempt from rate limiting. /auth/refresh fires on every page load and
-# is already gated by a valid refresh cookie, so it isn't an unauthenticated
-# brute-force vector the way /auth/login is — counting it against the small anon
-# budget would log legitimate users out on reload. Login/register stay limited.
-RATE_LIMIT_EXEMPT = ("/api/v1/auth/refresh",)
+# Paths exempt from rate limiting. These are authenticated, high-frequency, and
+# not unauthenticated brute-force vectors:
+#   - /auth/refresh fires on every page load and is gated by a valid refresh
+#     cookie; counting it would log legitimate users out on reload.
+#   - /jobs/ is polled while a study is processing (live progress fallback).
+#   - /ws/ticket is requested to open each live-progress WebSocket.
+# Login/register stay limited.
+RATE_LIMIT_EXEMPT_PREFIXES = (
+    "/api/v1/auth/refresh",
+    "/api/v1/jobs/",
+    "/api/v1/ws/ticket",
+)
 
 
 def _client_id(request: Request) -> tuple[str, bool]:
@@ -59,11 +63,12 @@ def _client_id(request: Request) -> tuple[str, bool]:
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in RATE_LIMIT_EXEMPT:
+        if request.url.path.startswith(RATE_LIMIT_EXEMPT_PREFIXES):
             return await call_next(request)
 
         identity, is_auth = _client_id(request)
-        limit, window = AUTH_LIMIT if is_auth else ANON_LIMIT
+        window = settings.rate_limit_window_sec
+        limit = settings.rate_limit_auth if is_auth else settings.rate_limit_anon
         now = time.time()
         key = f"ratelimit:{identity}"
 

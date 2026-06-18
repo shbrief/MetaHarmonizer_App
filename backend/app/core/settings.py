@@ -76,6 +76,16 @@ class Settings(BaseSettings):
     # ── Web / CORS ──────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
 
+    # ── Rate limiting (spec §6.4) ───────────────────────────────────────────
+    # Sliding-window budgets per identity (user id when authenticated, else IP).
+    # The authenticated budget must comfortably cover an interactive dashboard
+    # session: page loads fan out to several endpoints and live job progress is
+    # polled, so a tight budget would 429 legitimate use. Anonymous traffic
+    # (login/register) stays small to blunt credential-stuffing.
+    rate_limit_auth: int = 600
+    rate_limit_anon: int = 20
+    rate_limit_window_sec: int = 60
+
     # ── Upload safety (spec §6.4) ───────────────────────────────────────────
     # Byte-size guard only (prevents a runaway upload filling the disk).
     # No row/column ceilings — study scale is guidance, not a gate.

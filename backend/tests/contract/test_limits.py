@@ -12,8 +12,9 @@ import redis as sync_redis
 from fastapi import FastAPI
 
 import app.core.redis as redis_mod
-from app.core.limits import ANON_LIMIT, install_limits
+from app.core.limits import install_limits
 from app.core.middleware import install_observability
+from app.core.settings import settings
 
 pytestmark = pytest.mark.asyncio
 
@@ -73,7 +74,7 @@ def _client(app: FastAPI) -> httpx.AsyncClient:
 
 @skip_no_redis
 async def test_anonymous_rate_limit_returns_429(_redis_clean):
-    limit, _ = ANON_LIMIT
+    limit = settings.rate_limit_anon
     app = _app()
     async with _client(app) as client:
         for _ in range(limit):
