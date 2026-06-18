@@ -260,17 +260,6 @@ async def logout(
             payload = decode_token(raw)
             await sessions_repo.revoke_by_jti(db, payload.get("jti", ""))
             await db.commit()
-            # Session-only retention: drop this user's not-yet-exported studies
-            # (and their mappings) so work isn't preserved past the session.
-            try:
-                from app.repositories import studies as studies_repo
-
-                uid = int(payload.get("sub", 0)) or None
-                if uid:
-                    await studies_repo.purge_user_studies(db, uid)
-                    await db.commit()
-            except Exception:  # noqa: BLE001 — purge is best-effort, never blocks logout
-                await db.rollback()
         except jwt.PyJWTError:
             pass
     _clear_refresh_cookie(response)

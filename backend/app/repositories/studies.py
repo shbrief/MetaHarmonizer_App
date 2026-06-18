@@ -7,12 +7,16 @@ service/router contract is unchanged — notably ``upload_date`` (mapped from
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Study
+
+# A study with no explicit "completed" mark is treated as scratch work and is
+# deleted once it's older than this, lazily on the owner's next list/overview.
+IDLE_STUDY_DAYS = 7
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -65,7 +69,14 @@ async def get_study(db: AsyncSession, study_id: str) -> dict | None:
 
 async def list_studies(db: AsyncSession, owner_id: int | None = None) -> list[dict]:
     """List studies. When ``owner_id`` is given, return only that user's studies
-    (per-user visibility); pass ``None`` for the admin/global view."""
+    (per-user visibility); pass ``None`` for the global view.
+
+    Lazily enforces the idle-expiry policy first: a user's studies older than
+    ``IDLE_STUDY_DAYS`` are deleted unless they were marked ``completed`` (an
+    explicit "keep this" signal). Cleanup runs on the owner's own list/overview
+    load, so no scheduler is required for it to take effect."""
+    if owner_id is not None:
+        await purge_idle_studies(db, owner_id)
     stmt = select(Study).order_by(Study.created_at.desc())
     if owner_id is not None:
         stmt = stmt.where(Study.owner_id == owner_id)
@@ -73,7 +84,8 @@ async def list_studies(db: AsyncSession, owner_id: int | None = None) -> list[di
 
 
 async def mark_exported(db: AsyncSession, study_id: str) -> None:
-    """Flag a study as exported so it survives the logout purge."""
+    """Flag a study as exported. Purely informational now (studies persist until
+    the user deletes them or they idle-expire); kept so exports are recorded."""
     await db.execute(update(Study).where(Study.id == study_id).values(exported=True))
 
 
@@ -81,19 +93,33 @@ async def update_status(db: AsyncSession, study_id: str, status: str) -> None:
     await db.execute(update(Study).where(Study.id == study_id).values(status=status))
 
 
-async def purge_user_studies(db: AsyncSession, owner_id: int | None) -> int:
-    """Delete a user's not-yet-exported studies (mappings/ontology rows follow
-    via ON DELETE CASCADE). Returns the number of studies removed. Used on
-    logout so in-progress work isn't preserved unless it was exported."""
-    if owner_id is None:
-        return 0
-    ids = list(
-        await db.scalars(
-            select(Study.id).where(
-                Study.owner_id == owner_id, Study.exported.is_(False)
-            )
+async def mark_completed(db: AsyncSession, study_id: str) -> dict | None:
+    """Mark a study ``completed`` — a "keep this" signal that also exempts it
+    from idle-expiry. The study stays fully viewable and exportable."""
+    s = await db.get(Study, study_id)
+    if not s:
+        return None
+    s.status = "completed"
+    await db.flush()
+    return _to_dict(s)
+
+
+async def delete_study(db: AsyncSession, study_id: str) -> bool:
+    """Delete one study (mappings/ontology rows follow via ON DELETE CASCADE).
+    Returns True if a row was removed. Ownership is enforced by the caller."""
+    res = await db.execute(delete(Study).where(Study.id == study_id))
+    return (res.rowcount or 0) > 0
+
+
+async def purge_idle_studies(db: AsyncSession, owner_id: int) -> int:
+    """Delete a user's studies older than ``IDLE_STUDY_DAYS`` that were never
+    marked ``completed``. Returns the number removed."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=IDLE_STUDY_DAYS)
+    res = await db.execute(
+        delete(Study).where(
+            Study.owner_id == owner_id,
+            Study.status != "completed",
+            Study.created_at < cutoff,
         )
     )
-    if ids:
-        await db.execute(delete(Study).where(Study.id.in_(ids)))
-    return len(ids)
+    return res.rowcount or 0

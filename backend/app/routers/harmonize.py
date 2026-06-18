@@ -15,12 +15,13 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import current_user, require_role
+from app.core.deps import actor_label, current_user, require_role
 from app.core.queue import enqueue_harmonize
 from app.core.settings import settings
 from app.core.uploads import check_upload_size
 from app.db.session import get_db
 from app.models import HarmonizeAccepted, OverviewResponse, StudyOut
+from app.repositories import audit as audit_repo
 from app.repositories import jobs as jobs_repo
 from app.repositories import mappings as mappings_repo
 from app.repositories import studies as studies_repo
@@ -148,18 +149,16 @@ async def get_harmonization_results(job_id: str, db: AsyncSession = Depends(get_
 
 @router.get("/studies", response_model=list[StudyOut])
 async def list_studies(user=Depends(current_user), db: AsyncSession = Depends(get_db)):
-    """List studies visible to the caller: a curator sees only their own
-    uploads; an admin sees everything."""
-    owner = None if getattr(user, "role", None) == "admin" else getattr(user, "id", None)
-    return await studies_repo.list_studies(db, owner_id=owner)
+    """List the caller's own studies. Studies are private per-user; admin
+    oversight is provided by the audit feed, not by seeing others' studies."""
+    return await studies_repo.list_studies(db, owner_id=getattr(user, "id", None))
 
 
 @router.get("/overview", response_model=OverviewResponse)
 async def get_overview(user=Depends(current_user), db: AsyncSession = Depends(get_db)):
     """Portfolio-wide harmonization summary for the home dashboard, scoped to
-    the caller's own studies (admins see the whole portfolio)."""
-    owner = None if getattr(user, "role", None) == "admin" else getattr(user, "id", None)
-    return await compute_overview(db, owner_id=owner)
+    the caller's own studies."""
+    return await compute_overview(db, owner_id=getattr(user, "id", None))
 
 
 @router.get("/studies/{study_id}", response_model=StudyOut)
@@ -169,3 +168,53 @@ async def get_study(study_id: str, db: AsyncSession = Depends(get_db)):
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
     return study
+
+
+@router.delete("/studies/{study_id}", status_code=204)
+async def delete_study(
+    study_id: str,
+    user=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete one of the caller's studies (and its mappings/ontology rows)."""
+    study = await studies_repo.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    if study.get("owner_id") not in (None, getattr(user, "id", None)):
+        raise HTTPException(status_code=403, detail="Not your study")
+    await studies_repo.delete_study(db, study_id)
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=study_id,
+        action="study_delete",
+        new_value=study.get("name"),
+        actor_id=user.id,
+        curator=actor_label(user),
+    )
+    await db.commit()
+
+
+@router.post("/studies/{study_id}/complete", response_model=StudyOut)
+async def complete_study(
+    study_id: str,
+    user=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a study completed: keeps it (exempt from idle-expiry), still
+    viewable and exportable."""
+    study = await studies_repo.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    if study.get("owner_id") not in (None, getattr(user, "id", None)):
+        raise HTTPException(status_code=403, detail="Not your study")
+    result = await studies_repo.mark_completed(db, study_id)
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=study_id,
+        action="study_complete",
+        new_value=study.get("name"),
+        actor_id=user.id,
+        curator=actor_label(user),
+    )
+    await db.commit()
+    return result

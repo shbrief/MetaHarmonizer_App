@@ -1,11 +1,11 @@
 import { useNavigate } from 'react-router-dom';
-import { FileSpreadsheet, ArrowRight, Upload } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { Upload } from 'lucide-react';
 import type { Study } from '../api/types';
-import { Card } from './ui/Card';
 import Button from './ui/Button';
-import Badge from './ui/Badge';
 import { EmptyState, LoadingBlock } from './ui/Feedback';
 import PageHeader from './ui/PageHeader';
+import StudyListCard from './StudyListCard';
 
 /** Landing list shown by review/quality/export pages when no study is selected. */
 export default function StudyPicker({
@@ -42,68 +42,13 @@ export default function StudyPicker({
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {studies.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => navigate(`${basePath}/${s.id}`)}
-              className="group text-left"
-            >
-              <Card className="flex items-center justify-between gap-3 p-4 transition hover:border-primary-300 hover:shadow-card">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-50 text-primary-600">
-                    <FileSpreadsheet className="h-5 w-5" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-slate-900">{s.name}</p>
-                    <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                      <span>{s.row_count ?? '—'} rows</span>·
-                      <span>{s.column_count ?? '—'} columns</span>
-                      {s.status && <Badge tone="slate">{s.status}</Badge>}
-                    </p>
-                    {s.upload_date && (
-                      <p className="mt-0.5 text-[11px] text-slate-400">Uploaded {timeAgo(s.upload_date)}</p>
-                    )}
-                  </div>
-                </div>
-                <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-primary-500" />
-              </Card>
-            </button>
-          ))}
+          <AnimatePresence>
+            {studies.map((s) => (
+              <StudyListCard key={s.id} study={s} basePath={basePath} />
+            ))}
+          </AnimatePresence>
         </div>
       )}
     </div>
   );
-}
-
-/** Compact study switcher used in page headers. */
-export function StudySelect({
-  studies,
-  value,
-  onChange,
-}: {
-  studies: Study[] | undefined;
-  value: string;
-  onChange: (id: string) => void;
-}) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="field !w-auto !py-2">
-      {studies?.map((s) => (
-        <option key={s.id} value={s.id}>
-          {s.name}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-/** Human-friendly relative time, e.g. "just now", "3m ago", "2h ago", "5d ago". */
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(diff)) return '';
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
 }
