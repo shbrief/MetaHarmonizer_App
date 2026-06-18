@@ -35,6 +35,8 @@ def _load_raw_df(study_id: str) -> pd.DataFrame:
 
     suffix = Path(path).suffix.lower()
     sep = "\t" if suffix in (".tsv", ".txt") else ","
+    # An export counts as "preserve this study" — exempt it from the logout purge.
+    db.mark_study_exported(study_id)
     return pd.read_csv(path, sep=sep, low_memory=False)
 
 
@@ -85,6 +87,7 @@ async def export_report(study_id: str):
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
+    db.mark_study_exported(study_id)
     report = export_mapping_report(study_id)
     return PlainTextResponse(
         content=report,

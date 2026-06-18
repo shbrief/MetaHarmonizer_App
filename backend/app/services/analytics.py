@@ -97,9 +97,10 @@ def compute_quality_metrics(study_id: str) -> QualityMetrics:
     )
 
 
-def compute_overview() -> OverviewResponse:
-    """Aggregate harmonization status across every study for the home dashboard."""
-    studies = db.list_studies()
+def compute_overview(owner_id: int | None = None) -> OverviewResponse:
+    """Aggregate harmonization status across studies for the home dashboard.
+    Scoped to ``owner_id`` when given (per-user view); ``None`` = all studies."""
+    studies = db.list_studies(owner_id=owner_id)
 
     total_columns = 0
     total_rows = 0

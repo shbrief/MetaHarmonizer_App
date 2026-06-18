@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import database as db
-from app.core.deps import require_role
+from app.core.deps import current_user, require_role
 from app.core.queue import enqueue_harmonize
 from app.core.settings import settings
 from app.core.uploads import check_upload_size
@@ -100,6 +100,7 @@ async def harmonize_study(
         file_path=str(save_path),
         row_count=len(shape_df),
         column_count=len(shape_df.columns),
+        owner_id=getattr(user, "id", None),
     )
     db.update_study_status(study_id, "queued")
 
@@ -144,15 +145,19 @@ async def get_harmonization_results(job_id: str):
 
 
 @router.get("/studies", response_model=list[StudyOut])
-async def list_studies():
-    """List all harmonized studies."""
-    return db.list_studies()
+async def list_studies(user=Depends(current_user)):
+    """List studies visible to the caller: a curator sees only their own
+    uploads; an admin sees everything."""
+    owner = None if getattr(user, "role", None) == "admin" else getattr(user, "id", None)
+    return db.list_studies(owner_id=owner)
 
 
 @router.get("/overview", response_model=OverviewResponse)
-async def get_overview():
-    """Portfolio-wide harmonization summary for the home dashboard."""
-    return compute_overview()
+async def get_overview(user=Depends(current_user)):
+    """Portfolio-wide harmonization summary for the home dashboard, scoped to
+    the caller's own studies (admins see the whole portfolio)."""
+    owner = None if getattr(user, "role", None) == "admin" else getattr(user, "id", None)
+    return compute_overview(owner_id=owner)
 
 
 @router.get("/studies/{study_id}", response_model=StudyOut)

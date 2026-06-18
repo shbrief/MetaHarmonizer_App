@@ -103,6 +103,16 @@ def init_db() -> None:
     for col in ("curator_term", "curator_id", "reviewed_at", "reviewed_by"):
         if col not in existing_onto_cols:
             cur.execute(f"ALTER TABLE ontology_mappings ADD COLUMN {col} TEXT")
+
+    # Per-user ownership + export flag on studies (Sprint 3 follow-up). owner_id
+    # links to the Postgres user id; exported guards a study from logout purge.
+    existing_study_cols = {
+        row[1] for row in cur.execute("PRAGMA table_info(studies)").fetchall()
+    }
+    if "owner_id" not in existing_study_cols:
+        cur.execute("ALTER TABLE studies ADD COLUMN owner_id INTEGER")
+    if "exported" not in existing_study_cols:
+        cur.execute("ALTER TABLE studies ADD COLUMN exported INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -117,13 +127,14 @@ def create_study(
     file_path: str,
     row_count: int,
     column_count: int,
+    owner_id: Optional[int] = None,
 ) -> dict:
     conn = get_connection()
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        """INSERT INTO studies (id, name, upload_date, status, file_path, row_count, column_count)
-           VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
-        (study_id, name, now, file_path, row_count, column_count),
+        """INSERT INTO studies (id, name, upload_date, status, file_path, row_count, column_count, owner_id)
+           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
+        (study_id, name, now, file_path, row_count, column_count, owner_id),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM studies WHERE id = ?", (study_id,)).fetchone()
@@ -138,11 +149,48 @@ def get_study(study_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
-def list_studies() -> list[dict]:
+def list_studies(owner_id: Optional[int] = None) -> list[dict]:
+    """List studies. When ``owner_id`` is given, return only that user's studies
+    (per-user visibility); pass ``None`` for the admin/global view."""
     conn = get_connection()
-    rows = conn.execute("SELECT * FROM studies ORDER BY upload_date DESC").fetchall()
+    if owner_id is None:
+        rows = conn.execute("SELECT * FROM studies ORDER BY upload_date DESC").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM studies WHERE owner_id = ? ORDER BY upload_date DESC",
+            (owner_id,),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def mark_study_exported(study_id: str) -> None:
+    """Flag a study as exported so it survives the logout purge."""
+    conn = get_connection()
+    conn.execute("UPDATE studies SET exported = 1 WHERE id = ?", (study_id,))
+    conn.commit()
+    conn.close()
+
+
+def purge_user_studies(owner_id: int) -> int:
+    """Delete a user's not-yet-exported studies (and their mappings/ontology via
+    ON DELETE CASCADE). Returns the number of studies removed. Used on logout so
+    in-progress work isn't preserved unless it was exported."""
+    if owner_id is None:
+        return 0
+    conn = get_connection()
+    ids = [
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM studies WHERE owner_id = ? AND exported = 0", (owner_id,)
+        ).fetchall()
+    ]
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(f"DELETE FROM studies WHERE id IN ({placeholders})", ids)
+        conn.commit()
+    conn.close()
+    return len(ids)
 
 
 def update_study_status(study_id: str, status: str) -> None:
