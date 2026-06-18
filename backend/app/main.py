@@ -31,8 +31,9 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm the selected engine in a background thread so the server
     # starts accepting requests immediately.  The engine loads the
-    # SentenceTransformer model (~90 MB) and dictionaries once;
-    # subsequent /harmonize uploads reuse the cached engine.
+    # SentenceTransformer model (~90 MB) and dictionaries once, and warms the
+    # persistent NCI EVS cache over a bundled sample so the first real upload
+    # doesn't pay the cold-cache network cost; subsequent uploads reuse both.
     def _warm():
         from app.engine_adapter import get_engine
         get_engine().pre_warm()

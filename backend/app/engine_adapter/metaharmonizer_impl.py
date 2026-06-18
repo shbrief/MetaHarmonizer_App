@@ -147,6 +147,37 @@ class MetaHarmonizerAdapter:
 
         _perf.install_patches()
         _perf.warm_model()
+        # Warm the NCI EVS cache over a representative sample so the FIRST real
+        # upload doesn't pay the cold-cache network cost (~90s of rate-limited
+        # API calls). Runs once; results persist to disk across restarts.
+        self._warm_nci_cache()
+
+    def _warm_nci_cache(self) -> None:
+        """Populate + persist the NCI cache by harmonizing a sample CSV.
+
+        Best-effort and never raises. Controlled by ``ENGINE_WARM_SAMPLE``:
+        a CSV path to use, or ``off``/``0``/``false``/``none`` to disable. When
+        unset, falls back to the bundled ``metadata_samples/new_meta.csv``.
+        """
+        flag = os.getenv("ENGINE_WARM_SAMPLE")
+        if flag and flag.strip().lower() in {"off", "0", "false", "none"}:
+            return
+        sample = Path(flag) if flag else self._default_warm_sample()
+        if sample is None or not sample.exists():
+            return
+        try:
+            df = pd.read_csv(sample, dtype=str)
+            self.harmonize_schema(df, None, csv_path=str(sample))
+        except Exception:  # pragma: no cover — warming must never break startup
+            pass
+
+    @staticmethod
+    def _default_warm_sample() -> Path | None:
+        # backend/app/engine_adapter/metaharmonizer_impl.py → repo root is
+        # parents[3]; the curated metadata samples live under metadata_samples/.
+        here = Path(__file__).resolve()
+        candidate = here.parents[3] / "metadata_samples" / "new_meta.csv"
+        return candidate if candidate.exists() else None
 
     def health(self) -> EngineHealth:
         try:
