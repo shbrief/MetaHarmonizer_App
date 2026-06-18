@@ -9,6 +9,8 @@ import {
   Copy,
   Check,
   LogOut,
+  Eye,
+  Pencil,
   User as UserIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -173,14 +175,41 @@ export default function ProfilePage() {
           description="Personal tokens for CLI and programmatic access."
           action={
             <div className="flex items-center gap-2">
-              <select
-                value={scope}
-                onChange={(e) => setScope(e.target.value as 'read' | 'write')}
-                className="field !w-auto !py-1.5 text-xs"
+              {/* Segmented read/write scope toggle */}
+              <div
+                role="radiogroup"
+                aria-label="Token scope"
+                className="inline-flex items-center rounded-lg bg-slate-100 p-0.5"
               >
-                <option value="read">read</option>
-                <option value="write">write</option>
-              </select>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={scope === 'read'}
+                  onClick={() => setScope('read')}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                    scope === 'read'
+                      ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  Read
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={scope === 'write'}
+                  onClick={() => setScope('write')}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                    scope === 'write'
+                      ? 'bg-white text-accent-700 shadow-sm ring-1 ring-accent-200'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Write
+                </button>
+              </div>
               <Button
                 size="sm"
                 icon={<Plus className="h-3.5 w-3.5" />}
@@ -239,7 +268,10 @@ export default function ProfilePage() {
                       Created {new Date(t.created_at).toLocaleDateString()}
                     </p>
                   </div>
-                  <Badge tone={t.scope === 'write' ? 'indigo' : 'slate'}>{t.scope}</Badge>
+                  <Badge tone={t.scope === 'write' ? 'indigo' : 'slate'}>
+                    {t.scope === 'write' ? <Pencil className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    {t.scope}
+                  </Badge>
                 </div>
                 <Button
                   variant="ghost"

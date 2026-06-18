@@ -115,23 +115,22 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
 
         {/* Action footer — completing removes the study (auto-removed after a
             week otherwise). */}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-2">
-          <p className="text-[11px] text-slate-400">
-            Completing removes this study. Left alone, it auto-deletes in a week.
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-4 py-2.5">
+          <p className="text-[11px] leading-tight text-slate-400">
+            Completing removes this study.
+            <br className="hidden sm:block" />
+            Left alone, it auto-deletes in a week.
           </p>
-          <label
-            className="flex shrink-0 cursor-pointer items-center gap-2 text-xs font-medium text-emerald-600 hover:text-emerald-700"
+          <button
+            type="button"
+            onClick={onComplete}
+            disabled={celebrating}
             title="Mark complete and remove this study"
+            className="group/btn inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:shadow active:scale-95 disabled:opacity-60"
           >
-            <input
-              type="checkbox"
-              checked={celebrating}
-              onChange={onComplete}
-              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-            />
-            <CircleCheck className="h-3.5 w-3.5" />
+            <CircleCheck className="h-4 w-4 transition group-hover/btn:scale-110" />
             Complete
-          </label>
+          </button>
         </div>
       </Card>
     </motion.div>

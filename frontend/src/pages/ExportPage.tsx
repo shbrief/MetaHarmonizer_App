@@ -105,10 +105,11 @@ export default function ExportPage() {
         <button
           onClick={onComplete}
           disabled={del.isPending}
-          className="btn btn-sm border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+          title="Mark complete and remove this study"
+          className="group/btn inline-flex shrink-0 items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:shadow active:scale-95 disabled:opacity-60"
         >
-          <CircleCheck className="h-4 w-4" />
-          Complete & remove
+          <CircleCheck className="h-4 w-4 transition group-hover/btn:scale-110" />
+          Complete &amp; remove
         </button>
       </div>
     </div>
