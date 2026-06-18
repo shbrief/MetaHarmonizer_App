@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import {
   Activity,
@@ -259,14 +259,14 @@ export default function ActivityPage() {
 
 function ActionFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
+  const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
   const current = value ? meta(value) : null;
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <span className="mb-1 block text-xs font-medium text-slate-600">Action</span>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
         className="field flex !w-56 items-center justify-between gap-2 !py-2 text-left"
       >
         <span className="flex items-center gap-2 truncate">
@@ -285,7 +285,7 @@ function ActionFilter({ value, onChange }: { value: string; onChange: (v: string
         <div className="absolute z-20 mt-1 max-h-72 w-64 overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
           <button
             type="button"
-            onMouseDown={() => { onChange(''); setOpen(false); }}
+            onClick={() => { onChange(''); setOpen(false); }}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
           >
             <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
@@ -297,7 +297,7 @@ function ActionFilter({ value, onChange }: { value: string; onChange: (v: string
               <button
                 key={a}
                 type="button"
-                onMouseDown={() => { onChange(a); setOpen(false); }}
+                onClick={() => { onChange(a); setOpen(false); }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
               >
                 <span className={`grid h-6 w-6 place-items-center rounded ${m.tone}`}>{m.icon}</span>
@@ -327,6 +327,7 @@ function UserFilter({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -337,7 +338,7 @@ function UserFilter({
   }, [users, q]);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <span className="mb-1 block text-xs font-medium text-slate-600">User</span>
       <button
         type="button"
@@ -345,7 +346,6 @@ function UserFilter({
           setOpen((o) => !o);
           window.setTimeout(() => inputRef.current?.focus(), 0);
         }}
-        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
         className="field flex !w-56 items-center justify-between gap-2 !py-2 text-left"
       >
         <span className="truncate">
@@ -375,7 +375,7 @@ function UserFilter({
           <div className="max-h-64 overflow-auto py-1">
             <button
               type="button"
-              onMouseDown={() => { onChange(null); setOpen(false); }}
+              onClick={() => { onChange(null); setOpen(false); }}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
             >
               Everyone
@@ -388,7 +388,7 @@ function UserFilter({
               <button
                 key={u.id}
                 type="button"
-                onMouseDown={() => { onChange(u); setOpen(false); }}
+                onClick={() => { onChange(u); setOpen(false); }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
               >
                 <Avatar user={u} />
@@ -415,4 +415,17 @@ function Avatar({ user }: { user: User }) {
       {initials}
     </span>
   );
+}
+
+/** Close a popover when the user clicks/taps anywhere outside the returned ref. */
+function useClickOutside<T extends HTMLElement>(onOutside: () => void) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onOutside();
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [onOutside]);
+  return ref;
 }
