@@ -72,16 +72,22 @@ interface JobsContextValue {
 
 const JobsContext = createContext<JobsContextValue | null>(null);
 
-const STORAGE_KEY = 'mh.jobs.v1';
+// Jobs are persisted per-user so two accounts sharing a browser never see each
+// other's processing list. The key is namespaced by user id; logged-out has no
+// key at all (the tray is empty until someone signs in).
+const STORAGE_PREFIX = 'mh.jobs.v1';
+const storageKey = (userId: number | null | undefined): string | null =>
+    userId == null ? null : `${STORAGE_PREFIX}.${userId}`;
 const POLL_INTERVAL_MS = 2000;
 /** Drop finished jobs from storage after this long so the tray self-cleans. */
 const FINISHED_TTL_MS = 24 * 60 * 60 * 1000;
 
 const isTerminal = (p: JobPhase) => p === 'done' || p === 'failed' || p === 'cancelled';
 
-function loadPersisted(): TrackedJob[] {
+function loadPersisted(key: string | null): TrackedJob[] {
+    if (!key) return [];
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = localStorage.getItem(key);
         if (!raw) return [];
         const parsed = JSON.parse(raw) as TrackedJob[];
         if (!Array.isArray(parsed)) return [];
@@ -120,22 +126,36 @@ function reconcile(prev: TrackedJob, status: Awaited<ReturnType<typeof getJobSta
 }
 
 export function JobsProvider({ children }: { children: ReactNode }) {
-    const { isAuthenticated } = useAuth();
+    const { isAuthenticated, user } = useAuth();
+    const userId = user?.id ?? null;
     const qc = useQueryClient();
-    const [jobs, setJobs] = useState<TrackedJob[]>(() => loadPersisted());
+    const [jobs, setJobs] = useState<TrackedJob[]>(() => loadPersisted(storageKey(userId)));
     // Keep a ref so the polling interval always sees the latest jobs without
     // being torn down/recreated on every state change.
     const jobsRef = useRef(jobs);
     jobsRef.current = jobs;
 
-    // Persist on every change.
+    // When the signed-in user changes (login / logout / account switch on the
+    // same browser), swap to that user's own persisted jobs so the tray is
+    // strictly per-user and never leaks another account's processing list.
+    const lastUserId = useRef<number | null>(userId);
     useEffect(() => {
+        if (lastUserId.current === userId) return;
+        lastUserId.current = userId;
+        setJobs(loadPersisted(storageKey(userId)));
+    }, [userId]);
+
+    // Persist on every change, under the current user's key (no key when
+    // logged out → nothing is written).
+    useEffect(() => {
+        const key = storageKey(userId);
+        if (!key) return;
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
+            localStorage.setItem(key, JSON.stringify(jobs));
         } catch {
             /* storage full / disabled — non-fatal */
         }
-    }, [jobs]);
+    }, [jobs, userId]);
 
     const track = useCallback<JobsContextValue['track']>((input) => {
         setJobs((prev) => {
