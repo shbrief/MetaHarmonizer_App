@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import type { Study } from '../api/types';
 import { Card } from './ui/Card';
 import Badge from './ui/Badge';
-import { useDeleteStudy } from '../hooks/queries';
+import { useCompleteStudy } from '../hooks/queries';
+import { useJobs } from '../context/JobsContext';
 
 const CONFETTI = ['#22c55e', '#16a34a', '#86efac', '#4ade80', '#bbf7d0', '#34d399'];
 
@@ -40,19 +41,23 @@ function Confetti() {
 
 /** Study card used in the picker list, with a celebratory delete + a
  *  Checking "Complete" turns the card green, pops a confetti burst, then the
- *  card vanishes as the study is removed. Studies left incomplete are
- *  auto-removed after a week. */
+ *  card leaves the work list. The study is kept (its work still counts toward
+ *  the dashboard) but filed away and dropped from the job-tracking tray.
+ *  Studies left incomplete are auto-removed after a week. */
 export default function StudyListCard({ study, basePath }: { study: Study; basePath: string }) {
   const navigate = useNavigate();
-  const del = useDeleteStudy();
+  const complete = useCompleteStudy();
+  const { dismiss } = useJobs();
   const [celebrating, setCelebrating] = useState(false);
 
   const onComplete = () => {
     if (celebrating) return;
     setCelebrating(true);
-    // Let the celebration play, then remove the study (the exit animates).
+    // Let the celebration play, then mark complete (the exit animates as the
+    // study leaves the work list) and clear it from the bottom job tray.
     window.setTimeout(() => {
-      del.mutate(study.id, {
+      complete.mutate(study.id, {
+        onSuccess: () => dismiss(study.id),
         onError: () => {
           setCelebrating(false);
           toast.error('Could not complete study');
@@ -113,13 +118,13 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
           <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-primary-500" />
         </button>
 
-        {/* Action footer — completing removes the study (auto-removed after a
-            week otherwise). */}
+        {/* Action footer — completing files the study away (kept for the
+            dashboard, removed from the work list + job tray). */}
         <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-4 py-2.5">
           <p className="text-[11px] leading-tight text-slate-400">
-            Completing removes this study.
+            Completing files this away (still counts on the dashboard).
             <br className="hidden sm:block" />
-            Left alone, it auto-deletes in a week.
+            Left incomplete, it auto-deletes in a week.
           </p>
           <button
             type="button"

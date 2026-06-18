@@ -2,7 +2,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Download, FileText, Database, FileJson, CircleCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { getExportUrl } from '../api/client';
-import { useDeleteStudy, useStudies } from '../hooks/queries';
+import { useCompleteStudy, useStudies } from '../hooks/queries';
+import { useJobs } from '../context/JobsContext';
 import PageHeader from '../components/ui/PageHeader';
 import { Card, CardBody } from '../components/ui/Card';
 import StudyPicker from '../components/StudyPicker';
@@ -11,7 +12,8 @@ export default function ExportPage() {
   const { studyId } = useParams<{ studyId: string }>();
   const navigate = useNavigate();
   const { data: studies, isLoading } = useStudies();
-  const del = useDeleteStudy();
+  const complete = useCompleteStudy();
+  const { dismiss } = useJobs();
 
   if (!studyId) {
     return (
@@ -53,9 +55,10 @@ export default function ExportPage() {
 
   const onComplete = () => {
     if (!studyId) return;
-    del.mutate(studyId, {
+    complete.mutate(studyId, {
       onSuccess: () => {
-        toast.success('Study completed and removed');
+        dismiss(studyId);
+        toast.success('Study completed');
         navigate('/export');
       },
       onError: () => toast.error('Could not complete study'),
@@ -96,20 +99,20 @@ export default function ExportPage() {
         ))}
       </div>
 
-      {/* Study lifecycle action — completing removes the study */}
+      {/* Study lifecycle action — completing files the study away */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
         <p className="text-xs text-slate-500">
-          Completing removes this study and its mappings. Studies left incomplete are
-          auto-removed after a week.
+          Completing files this study away — it still counts on the dashboard but leaves
+          your work list. Studies left incomplete are auto-removed after a week.
         </p>
         <button
           onClick={onComplete}
-          disabled={del.isPending}
-          title="Mark complete and remove this study"
+          disabled={complete.isPending}
+          title="Mark this study complete"
           className="group/btn inline-flex shrink-0 items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:shadow active:scale-95 disabled:opacity-60"
         >
           <CircleCheck className="h-4 w-4 transition group-hover/btn:scale-110" />
-          Complete &amp; remove
+          Complete
         </button>
       </div>
     </div>

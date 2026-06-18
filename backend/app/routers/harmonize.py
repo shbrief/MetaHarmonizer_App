@@ -149,9 +149,12 @@ async def get_harmonization_results(job_id: str, db: AsyncSession = Depends(get_
 
 @router.get("/studies", response_model=list[StudyOut])
 async def list_studies(user=Depends(current_user), db: AsyncSession = Depends(get_db)):
-    """List the caller's own studies. Studies are private per-user; admin
-    oversight is provided by the audit feed, not by seeing others' studies."""
-    return await studies_repo.list_studies(db, owner_id=getattr(user, "id", None))
+    """List the caller's own *active* studies (completed ones are filed away and
+    excluded). Studies are private per-user; admin oversight is the audit feed,
+    not seeing others' studies."""
+    return await studies_repo.list_studies(
+        db, owner_id=getattr(user, "id", None), include_completed=False
+    )
 
 
 @router.get("/overview", response_model=OverviewResponse)
@@ -192,3 +195,30 @@ async def delete_study(
         curator=actor_label(user),
     )
     await db.commit()
+
+
+@router.post("/studies/{study_id}/complete", response_model=StudyOut)
+async def complete_study(
+    study_id: str,
+    user=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a study completed: it's kept (so its work still counts toward the
+    dashboard) but filed away — excluded from the work-list pickers and exempt
+    from idle-expiry."""
+    study = await studies_repo.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    if study.get("owner_id") not in (None, getattr(user, "id", None)):
+        raise HTTPException(status_code=403, detail="Not your study")
+    result = await studies_repo.mark_completed(db, study_id)
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=study_id,
+        action="study_complete",
+        new_value=study.get("name"),
+        actor_id=user.id,
+        curator=actor_label(user),
+    )
+    await db.commit()
+    return result
