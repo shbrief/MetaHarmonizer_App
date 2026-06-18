@@ -213,6 +213,7 @@ export default function AdminPage() {
                             variant={u.is_active ? 'ghost' : 'secondary'}
                             size="sm"
                             disabled={isSelf}
+                            icon={u.is_active ? <Ban className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                             className={u.is_active ? 'text-rose-600 hover:bg-rose-50' : ''}
                             loading={activeM.isPending && activeM.variables?.id === u.id}
                             onClick={() => activeM.mutate({ id: u.id, isActive: !u.is_active })}

@@ -29,13 +29,18 @@ export default function Button({
   disabled,
   ...rest
 }: Props) {
+  // Size the spinner to match the icon box so the icon↔spinner swap doesn't
+  // change the button's width (which would otherwise make the row "jump").
+  const spinner = (
+    <Loader2 className={cn('animate-spin', size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4')} />
+  );
   return (
     <button
       className={cn(VARIANT[variant], size === 'sm' && 'btn-sm', className)}
       disabled={disabled || loading}
       {...rest}
     >
-      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
+      {loading ? spinner : icon}
       {children}
     </button>
   );
