@@ -7,10 +7,65 @@ the last seen id. Filters by study/action/actor are optional and composable.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditEvent
+
+
+def _iso(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def _to_dict(a: AuditEvent) -> dict:
+    """Shape an event like the legacy SQLite ``audit_log`` row: the curator
+    string lives in ``details['curator']`` and the time in ``created_at``, but
+    the dict exposes the legacy ``curator`` / ``timestamp`` keys."""
+    curator = a.details.get("curator") if isinstance(a.details, dict) else None
+    return {
+        "id": a.id,
+        "study_id": a.study_id,
+        "action": a.action,
+        "mapping_id": a.mapping_id,
+        "old_value": a.old_value,
+        "new_value": a.new_value,
+        "curator": curator,
+        "timestamp": _iso(a.created_at),
+    }
+
+
+async def add_audit_entry(
+    db: AsyncSession,
+    study_id: str,
+    action: str,
+    mapping_id: int | None = None,
+    old_value: str | None = None,
+    new_value: str | None = None,
+    curator: str = "curator",
+) -> None:
+    db.add(
+        AuditEvent(
+            study_id=study_id,
+            action=action,
+            mapping_id=mapping_id,
+            old_value=old_value,
+            new_value=new_value,
+            details={"curator": curator} if curator else None,
+        )
+    )
+    await db.flush()
+
+
+async def get_audit_log(db: AsyncSession, study_id: str) -> list[dict]:
+    """All events for one study, newest-first, shaped like the legacy rows."""
+    stmt = (
+        select(AuditEvent)
+        .where(AuditEvent.study_id == study_id)
+        .order_by(AuditEvent.created_at.desc())
+    )
+    return [_to_dict(a) for a in await db.scalars(stmt)]
 
 
 async def list_audit_events(
