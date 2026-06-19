@@ -7,10 +7,6 @@
  * `notify()`, surfaced as an unread badge on the header bell, and persisted to
  * localStorage so they survive a reload. Storage is namespaced per user id so
  * two accounts sharing a browser never see each other's notifications.
- *
- * Desktop notifications are strictly opt-in: nothing is shown until the user
- * enables them (which triggers the browser permission prompt). The preference
- * is remembered per user.
  */
 
 import {
@@ -41,27 +37,18 @@ export interface AppNotification {
 interface NotificationsContextValue {
     notifications: AppNotification[];
     unreadCount: number;
-    /** Raise a new notification (also fires a desktop notification if enabled). */
+    /** Raise a new in-app notification (surfaced on the header bell). */
     notify(input: Omit<AppNotification, 'id' | 'createdAt' | 'read'>): void;
     markAllRead(): void;
     dismiss(id: string): void;
     clear(): void;
-    /** Whether opt-in desktop notifications are currently active. */
-    desktopEnabled: boolean;
-    /** Request desktop-notification permission and enable them. */
-    enableDesktop(): Promise<void>;
-    /** Turn desktop notifications back off (permission is not revoked). */
-    disableDesktop(): void;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
 
 const STORAGE_PREFIX = 'mh.notifs.v1';
-const DESKTOP_PREF_PREFIX = 'mh.notifs.desktop.v1';
 const storageKey = (userId: number | null | undefined): string | null =>
     userId == null ? null : `${STORAGE_PREFIX}.${userId}`;
-const desktopPrefKey = (userId: number | null | undefined): string | null =>
-    userId == null ? null : `${DESKTOP_PREF_PREFIX}.${userId}`;
 
 /** Cap stored notifications so the list (and localStorage) stays bounded. */
 const MAX_NOTIFICATIONS = 50;
@@ -78,24 +65,6 @@ function loadPersisted(key: string | null): AppNotification[] {
     }
 }
 
-function loadDesktopPref(key: string | null): boolean {
-    if (!key) return false;
-    try {
-        // The toggle is only truly "on" when the user opted in *and* the browser
-        // permission is still granted. The permission can drift out of sync with
-        // the stored pref (e.g. it was reset to "ask", or site data was cleared),
-        // so reconcile here — otherwise the toggle shows "on" while popups
-        // silently never fire.
-        if (localStorage.getItem(key) !== '1') return false;
-        return supportsDesktop() && Notification.permission === 'granted';
-    } catch {
-        return false;
-    }
-}
-
-const supportsDesktop = (): boolean =>
-    typeof window !== 'undefined' && 'Notification' in window;
-
 const makeId = (): string =>
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -108,21 +77,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const [notifications, setNotifications] = useState<AppNotification[]>(() =>
         loadPersisted(storageKey(userId)),
     );
-    const [desktopEnabled, setDesktopEnabled] = useState<boolean>(() =>
-        loadDesktopPref(desktopPrefKey(userId)),
-    );
-    // A ref the notify() callback reads so it isn't recreated on every change.
-    const desktopRef = useRef(desktopEnabled);
-    desktopRef.current = desktopEnabled;
 
-    // Swap to the signed-in user's own notifications + preference on login /
-    // logout / account switch within the same browser.
+    // Swap to the signed-in user's own notifications on login / logout / account
+    // switch within the same browser.
     const lastUserId = useRef<number | null>(userId);
     useEffect(() => {
         if (lastUserId.current === userId) return;
         lastUserId.current = userId;
         setNotifications(loadPersisted(storageKey(userId)));
-        setDesktopEnabled(loadDesktopPref(desktopPrefKey(userId)));
     }, [userId]);
 
     // Persist notifications under the current user's key (nothing when logged out).
@@ -144,28 +106,6 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             read: false,
         };
         setNotifications((prev) => [entry, ...prev].slice(0, MAX_NOTIFICATIONS));
-
-        // Mirror to the OS only when the user opted in and granted permission.
-        if (
-            desktopRef.current &&
-            supportsDesktop() &&
-            Notification.permission === 'granted'
-        ) {
-            try {
-                const n = new Notification(input.title, {
-                    body: input.body,
-                    tag: entry.id,
-                });
-                if (input.href) {
-                    n.onclick = () => {
-                        window.focus();
-                        window.location.assign(input.href!);
-                    };
-                }
-            } catch {
-                /* Some browsers throw if called outside a user gesture — ignore. */
-            }
-        }
     }, []);
 
     const markAllRead = useCallback(() => {
@@ -180,37 +120,6 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
 
     const clear = useCallback(() => setNotifications([]), []);
 
-    const enableDesktop = useCallback(async () => {
-        if (!supportsDesktop()) return;
-        let permission = Notification.permission;
-        if (permission === 'default') {
-            permission = await Notification.requestPermission();
-        }
-        if (permission === 'granted') {
-            setDesktopEnabled(true);
-            const key = desktopPrefKey(lastUserId.current);
-            if (key) {
-                try {
-                    localStorage.setItem(key, '1');
-                } catch {
-                    /* non-fatal */
-                }
-            }
-        }
-    }, []);
-
-    const disableDesktop = useCallback(() => {
-        setDesktopEnabled(false);
-        const key = desktopPrefKey(lastUserId.current);
-        if (key) {
-            try {
-                localStorage.removeItem(key);
-            } catch {
-                /* non-fatal */
-            }
-        }
-    }, []);
-
     const value = useMemo<NotificationsContextValue>(
         () => ({
             notifications,
@@ -219,11 +128,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             markAllRead,
             dismiss,
             clear,
-            desktopEnabled,
-            enableDesktop,
-            disableDesktop,
         }),
-        [notifications, notify, markAllRead, dismiss, clear, desktopEnabled, enableDesktop, disableDesktop],
+        [notifications, notify, markAllRead, dismiss, clear],
     );
 
     return (

@@ -6,7 +6,6 @@ import {
     CircleCheck,
     CircleX,
     Info,
-    MonitorSmartphone,
     Trash2,
     X,
 } from 'lucide-react';
@@ -42,10 +41,6 @@ export default function NotificationBell() {
         markAllRead,
         dismiss,
         clear,
-        notify,
-        desktopEnabled,
-        enableDesktop,
-        disableDesktop,
     } = useNotifications();
     const navigate = useNavigate();
 
@@ -132,43 +127,6 @@ export default function NotificationBell() {
                                     </button>
                                 </div>
                             ))
-                        )}
-                    </div>
-
-                    <DropdownMenu.Separator className="my-1 h-px bg-slate-100" />
-
-                    {/* Opt-in desktop notifications. */}
-                    <div className="flex items-center gap-1.5">
-                        <button
-                            onClick={() => (desktopEnabled ? disableDesktop() : void enableDesktop())}
-                            className="flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-medium text-slate-600 transition hover:bg-slate-100"
-                        >
-                            <MonitorSmartphone className="h-4 w-4 text-slate-400" />
-                            <span className="flex-1">Desktop notifications</span>
-                            <span
-                                className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                                    desktopEnabled
-                                        ? 'bg-emerald-100 text-emerald-700'
-                                        : 'bg-slate-100 text-slate-500'
-                                }`}
-                            >
-                                {desktopEnabled ? 'On' : 'Off'}
-                            </span>
-                        </button>
-                        {desktopEnabled && (
-                            <button
-                                onClick={() =>
-                                    notify({
-                                        kind: 'info',
-                                        title: 'Test notification',
-                                        body: 'Desktop notifications are working 🎉',
-                                    })
-                                }
-                                title="Send a test notification"
-                                className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium text-primary-600 transition hover:bg-primary-50"
-                            >
-                                Send test
-                            </button>
                         )}
                     </div>
                 </DropdownMenu.Content>
