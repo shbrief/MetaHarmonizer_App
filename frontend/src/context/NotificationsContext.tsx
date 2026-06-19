@@ -81,7 +81,13 @@ function loadPersisted(key: string | null): AppNotification[] {
 function loadDesktopPref(key: string | null): boolean {
     if (!key) return false;
     try {
-        return localStorage.getItem(key) === '1';
+        // The toggle is only truly "on" when the user opted in *and* the browser
+        // permission is still granted. The permission can drift out of sync with
+        // the stored pref (e.g. it was reset to "ask", or site data was cleared),
+        // so reconcile here — otherwise the toggle shows "on" while popups
+        // silently never fire.
+        if (localStorage.getItem(key) !== '1') return false;
+        return supportsDesktop() && Notification.permission === 'granted';
     } catch {
         return false;
     }
