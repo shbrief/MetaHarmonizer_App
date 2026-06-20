@@ -13,6 +13,8 @@ import app.core.settings as settings_mod
 import app.db.session as db_session
 from app.db.models import User
 
+from _authflow import register_and_login
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -58,8 +60,7 @@ async def env(database_url, monkeypatch):
 
 
 async def _register(c, email, pw="pw-123456"):
-    r = await c.post("/api/v1/auth/register", json={"email": email, "password": pw})
-    return r.json()
+    return await register_and_login(c, email, pw)
 
 
 async def test_create_list_and_use_token(env):

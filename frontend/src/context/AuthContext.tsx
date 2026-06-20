@@ -20,12 +20,16 @@ interface AuthContextValue {
     initializing: boolean;
     isAuthenticated: boolean;
     login: (email: string, password: string) => Promise<User>;
+    /**
+     * Create an account. Does NOT sign in — non-bootstrap users must verify
+     * their email first. Resolves to the server's next-step message.
+     */
     register: (
         email: string,
         password: string,
         name?: string,
         requestAdmin?: boolean,
-    ) => Promise<User>;
+    ) => Promise<string>;
     logout: () => Promise<void>;
     setUser: (u: User | null) => void;
     /** Role hierarchy check: curator < admin. */
@@ -74,8 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     name,
                     request_admin: requestAdmin,
                 });
-                setUser(res.user);
-                return res.user;
+                return res.message;
             },
             logout: async () => {
                 await apiLogout();

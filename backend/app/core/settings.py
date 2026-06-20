@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     refresh_ttl_days: int = 30
     allowed_email_domains: str = ""  # comma-separated; empty -> admin-invite-only
     resend_api_key: str | None = None
+    # Email sending (verification + password reset). When resend_api_key is unset
+    # in a non-production env, links are logged instead of sent (dev convenience).
+    email_from: str = "MetaHarmonizer <onboarding@resend.dev>"
+    app_base_url: str = "http://localhost:5173"
+    email_verify_ttl_min: int = 24 * 60  # 24h
+    password_reset_ttl_min: int = 30
     # Set true in production (HTTPS) so the refresh cookie is Secure-only.
     cookie_secure: bool = False
     # Lock an account after this many consecutive failed logins.

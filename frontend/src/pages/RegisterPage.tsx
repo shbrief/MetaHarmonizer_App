@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, User as UserIcon, UserPlus } from 'lucide-react';
-import { toast } from 'sonner';
+import { Mail, Lock, User as UserIcon, UserPlus, MailCheck } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -37,6 +36,7 @@ export default function RegisterPage() {
   const [requestAdmin, setRequestAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
 
   const pwStrength = useMemo(() => strength(password), [password]);
   const canSubmit = email && password.length >= 8;
@@ -46,12 +46,9 @@ export default function RegisterPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const user = await register(email, password, name || undefined, requestAdmin);
-      toast.success(`Account created — welcome, ${user.name || user.email}`);
-      if (requestAdmin && user.role !== 'admin') {
-        toast('Admin access requested — an administrator will review it.');
-      }
-      navigate('/', { replace: true });
+      const message = await register(email, password, name || undefined, requestAdmin);
+      // Register no longer signs the user in — surface the next step instead.
+      setDone(message);
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -66,6 +63,36 @@ export default function RegisterPage() {
       setSubmitting(false);
     }
   };
+
+  if (done) {
+    return (
+      <AuthLayout
+        title="Check your inbox"
+        subtitle="One more step to activate your account."
+        footer={
+          <>
+            Ready to continue?{' '}
+            <Link to="/login" className="font-semibold text-primary-600 hover:text-primary-700">
+              Go to sign in
+            </Link>
+          </>
+        }
+      >
+        <div className="space-y-4 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50">
+            <MailCheck className="h-7 w-7 text-emerald-600" />
+          </div>
+          <p className="text-sm text-slate-600">{done}</p>
+          <p className="text-xs text-slate-400">
+            Didn’t get it? Check spam, or you can request a new link from the sign-in page.
+          </p>
+          <Button className="w-full" onClick={() => navigate('/login')}>
+            Go to sign in
+          </Button>
+        </div>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

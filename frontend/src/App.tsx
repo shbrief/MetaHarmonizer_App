@@ -12,6 +12,9 @@ import { useAuth } from './context/AuthContext';
 // Eager: tiny entry pages. Lazy: heavier feature pages (code-split per route).
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const UploadPage = lazy(() => import('./pages/UploadPage'));
 const MappingReview = lazy(() => import('./pages/MappingReview'));
@@ -164,6 +167,9 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
       <Route path="/register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
+      <Route path="/verify" element={<VerifyEmailPage />} />
+      <Route path="/forgot" element={<PublicOnly><ForgotPasswordPage /></PublicOnly>} />
+      <Route path="/reset" element={<ResetPasswordPage />} />
 
       <Route path="/" element={<Shell><DashboardPage /></Shell>} />
       <Route path="/upload" element={<Shell><UploadPage /></Shell>} />

@@ -45,3 +45,15 @@ async def create_user(
     db.add(user)
     await db.flush()
     return user
+
+
+async def set_email_verified(db: AsyncSession, user: User) -> None:
+    """Mark a user's email as confirmed (idempotent)."""
+    user.email_verified = True
+    await db.flush()
+
+
+async def set_password(db: AsyncSession, user: User, password_hash: str) -> None:
+    """Replace a user's password hash (used by the reset flow)."""
+    user.password_hash = password_hash
+    await db.flush()

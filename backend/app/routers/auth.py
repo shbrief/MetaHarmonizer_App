@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import AuthError, current_user
+from app.core.email import send_password_reset_email, send_verification_email
 from app.core.errors import AppError
 from app.core.hibp import password_breach_count
 from app.core.metrics import AUTH_FAILURES
@@ -28,23 +29,31 @@ from app.core.redis import get_redis
 from app.core.security import (
     REFRESH_COOKIE,
     create_access_token,
+    create_email_verify_token,
+    create_password_reset_token,
     create_refresh_token,
     decode_token,
     hash_password,
     new_jti,
     verify_password,
 )
+from app.core.security import _pw_fingerprint
 from app.core.settings import settings
 from app.db.models import User
 from app.db.session import get_db
 from app.repositories import sessions as sessions_repo
 from app.repositories import users as users_repo
 from app.schemas.auth import (
+    ForgotPasswordRequest,
     LoginRequest,
+    MessageResponse,
     RegisterRequest,
+    ResendVerificationRequest,
+    ResetPasswordRequest,
     SessionOut,
     TokenResponse,
     UserOut,
+    VerifyEmailRequest,
 )
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -59,6 +68,16 @@ class RegistrationClosedError(AppError):
 class EmailTakenError(AppError):
     code = "EMAIL_TAKEN"
     status_code = 409
+
+
+class EmailNotVerifiedError(AppError):
+    code = "EMAIL_NOT_VERIFIED"
+    status_code = 403
+
+
+class InvalidTokenError(AppError):
+    code = "INVALID_TOKEN"
+    status_code = 400
 
 
 class AccountLockedError(AppError):
@@ -151,13 +170,11 @@ async def _clear_failures(email: str) -> None:
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
-@router.post("/register", response_model=TokenResponse, status_code=201)
+@router.post("/register", response_model=MessageResponse, status_code=201)
 async def register(
     body: RegisterRequest,
-    request: Request,
-    response: Response,
     db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
+) -> MessageResponse:
     if not _domain_allowed(body.email):
         raise RegistrationClosedError(
             "Registration is restricted to approved email domains."
@@ -186,9 +203,19 @@ async def register(
         role=role,
         admin_requested=admin_requested,
     )
-    tokens, _ = await _issue_tokens(db, response, request, user)
+    # The bootstrap admin is auto-verified so the instance is never locked out
+    # before email is configured; everyone else must confirm their address.
+    if is_bootstrap:
+        user.email_verified = True
     await db.commit()
-    return tokens
+
+    if not is_bootstrap:
+        token = create_email_verify_token(user_id=user.id, email=user.email)
+        await send_verification_email(to=user.email, name=user.name, token=token)
+        return MessageResponse(
+            message="Account created. Check your email to verify your address before signing in.",
+        )
+    return MessageResponse(message="Admin account created. You can sign in now.")
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -211,10 +238,102 @@ async def login(
         raise AuthError("Incorrect email or password.")
     if not user.is_active:
         raise AuthError("This account is disabled.")
+    if not user.email_verified:
+        # Credentials are valid but the address isn't confirmed yet — block sign-in
+        # and let the client offer to resend the verification email.
+        raise EmailNotVerifiedError(
+            "Please verify your email address before signing in."
+        )
     await _clear_failures(body.email)
     tokens, _ = await _issue_tokens(db, response, request, user)
     await db.commit()
     return tokens
+
+
+# ── Email verification + password reset ──────────────────────────────────────
+@router.post("/verify-email", response_model=MessageResponse)
+async def verify_email(
+    body: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Confirm an email address from the signed token in the verification link."""
+    try:
+        payload = decode_token(body.token)
+    except jwt.PyJWTError:
+        raise InvalidTokenError("This verification link is invalid or has expired.")
+    if payload.get("type") != "email_verify":
+        raise InvalidTokenError("This verification link is invalid.")
+    user = await users_repo.get_by_id(db, int(payload.get("sub", 0)))
+    if not user:
+        raise InvalidTokenError("This verification link is invalid.")
+    if not user.email_verified:
+        await users_repo.set_email_verified(db, user)
+        await db.commit()
+    return MessageResponse(message="Email verified. You can now sign in.")
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+async def resend_verification(
+    body: ResendVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Resend the verification email. Always returns the same message so it
+    can't be used to probe which addresses are registered."""
+    user = await users_repo.get_by_email(db, body.email)
+    if user and not user.email_verified:
+        token = create_email_verify_token(user_id=user.id, email=user.email)
+        await send_verification_email(to=user.email, name=user.name, token=token)
+    return MessageResponse(
+        message="If that address needs verification, we've sent a new link.",
+    )
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Send a password-reset link. Always returns the same message regardless of
+    whether the address exists (no account enumeration)."""
+    user = await users_repo.get_by_email(db, body.email)
+    if user and user.password_hash:
+        token = create_password_reset_token(
+            user_id=user.id, password_hash=user.password_hash
+        )
+        await send_password_reset_email(to=user.email, name=user.name, token=token)
+    return MessageResponse(
+        message="If that address has an account, we've sent a reset link.",
+    )
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Set a new password from a reset token. The token is single-use: it's bound
+    to the old password's fingerprint, so once the password changes it's dead.
+    All existing sessions are revoked so a leaked link can't keep access."""
+    try:
+        payload = decode_token(body.token)
+    except jwt.PyJWTError:
+        raise InvalidTokenError("This reset link is invalid or has expired.")
+    if payload.get("type") != "password_reset":
+        raise InvalidTokenError("This reset link is invalid.")
+    if settings.hibp_check and await password_breach_count(body.password) > 0:
+        raise WeakPasswordError(
+            "This password has appeared in a data breach. Please choose a different one."
+        )
+    user = await users_repo.get_by_id(db, int(payload.get("sub", 0)))
+    if not user or payload.get("pwfp") != _pw_fingerprint(user.password_hash):
+        raise InvalidTokenError("This reset link is invalid or has already been used.")
+    await users_repo.set_password(db, user, hash_password(body.password))
+    # Verifying via a reset also confirms control of the inbox.
+    if not user.email_verified:
+        await users_repo.set_email_verified(db, user)
+    await sessions_repo.revoke_all_for_user(db, user.id)
+    await db.commit()
+    return MessageResponse(message="Password updated. You can now sign in.")
 
 
 @router.post("/refresh", response_model=TokenResponse)

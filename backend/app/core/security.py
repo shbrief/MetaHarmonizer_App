@@ -65,6 +65,41 @@ def decode_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, settings.jwt_secret, algorithms=[JWT_ALG])
 
 
+# ── Email verification + password reset tokens ───────────────────────────────
+# Stateless signed JWTs — no DB table needed. The reset token is made single-use
+# by binding it to a fingerprint of the current password hash: once the password
+# changes the fingerprint no longer matches, so a used (or stale) link is dead.
+
+def _pw_fingerprint(password_hash: str | None) -> str:
+    """Short, non-reversible fingerprint of a password hash, embedded in reset
+    tokens so they self-invalidate once the password changes."""
+    return hashlib.sha256((password_hash or "").encode("utf-8")).hexdigest()[:16]
+
+
+def create_email_verify_token(*, user_id: int, email: str) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "email": email,
+        "type": "email_verify",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=settings.email_verify_ttl_min)).timestamp()),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=JWT_ALG)
+
+
+def create_password_reset_token(*, user_id: int, password_hash: str | None) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "pwfp": _pw_fingerprint(password_hash),
+        "type": "password_reset",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=settings.password_reset_ttl_min)).timestamp()),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=JWT_ALG)
+
+
 # ── Refresh tokens ───────────────────────────────────────────────────────────
 def new_jti() -> str:
     """A unique, unguessable identifier for a refresh token / session."""

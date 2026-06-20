@@ -18,6 +18,8 @@ import app.core.settings as settings_mod
 import app.db.session as db_session
 from app.db.models import User
 
+from _authflow import register_and_login
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -65,8 +67,7 @@ async def env(database_url, monkeypatch):
 
 
 async def _register(c, email):
-    r = await c.post("/api/v1/auth/register", json={"email": email, "password": "pw-123456"})
-    return r.json()
+    return await register_and_login(c, email)
 
 
 async def test_curator_allowed_unauth_denied_on_write(env):

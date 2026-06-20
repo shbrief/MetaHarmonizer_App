@@ -17,6 +17,8 @@ import app.core.settings as settings_mod
 import app.db.session as db_session
 from app.db.models import JobFailure, JobRun, User
 
+from _authflow import register_and_login
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -140,11 +142,8 @@ async def test_ws_ticket_endpoint_requires_auth(env):
         r = await c.post("/api/v1/ws/ticket")
         assert r.status_code == 401
 
-        reg = await c.post(
-            "/api/v1/auth/register",
-            json={"email": f"wt@{domain}", "password": "pw-123456"},
-        )
-        tok = reg.json()["access_token"]
+        reg = await register_and_login(c, f"wt@{domain}")
+        tok = reg["access_token"]
         r = await c.post("/api/v1/ws/ticket", headers={"Authorization": f"Bearer {tok}"})
         assert r.status_code == 200
         assert len(r.json()["ticket"]) > 20
@@ -160,11 +159,8 @@ async def test_job_status_endpoint(env):
         await s.commit()
 
     async with make_client() as c:
-        reg = await c.post(
-            "/api/v1/auth/register",
-            json={"email": f"js@{domain}", "password": "pw-123456"},
-        )
-        tok = reg.json()["access_token"]
+        reg = await register_and_login(c, f"js@{domain}")
+        tok = reg["access_token"]
         r = await c.get(f"/api/v1/jobs/{study_id}", headers={"Authorization": f"Bearer {tok}"})
         assert r.status_code == 200
         assert r.json()["state"] == "queued"

@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../api/http';
+import { resendVerification } from '../api/auth';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -17,26 +18,47 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [needsVerify, setNeedsVerify] = useState(false);
+  const [resending, setResending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setNeedsVerify(false);
     setSubmitting(true);
     try {
       const user = await login(email, password);
       toast.success(`Welcome back, ${user.name || user.email}`);
       navigate(from, { replace: true });
     } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.code === 'ACCOUNT_LOCKED'
-            ? 'Too many attempts. Please wait a few minutes and try again.'
-            : err.message
-          : 'Sign in failed. Please try again.';
-      setError(msg);
+      if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {
+        setNeedsVerify(true);
+        setError('Please verify your email address before signing in.');
+      } else {
+        const msg =
+          err instanceof ApiError
+            ? err.code === 'ACCOUNT_LOCKED'
+              ? 'Too many attempts. Please wait a few minutes and try again.'
+              : err.message
+            : 'Sign in failed. Please try again.';
+        setError(msg);
+      }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      await resendVerification(email);
+      toast.success('Verification email sent. Check your inbox.');
+      setNeedsVerify(false);
+    } catch {
+      toast.error('Could not send the email. Please try again.');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -77,9 +99,28 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
         />
 
+        <div className="flex justify-end -mt-1">
+          <Link
+            to="/forgot"
+            className="text-xs font-medium text-primary-600 hover:text-primary-700"
+          >
+            Forgot password?
+          </Link>
+        </div>
+
         {error && (
           <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
             {error}
+            {needsVerify && (
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending}
+                className="mt-1.5 block font-semibold text-rose-800 underline underline-offset-2 disabled:opacity-60"
+              >
+                {resending ? 'Sending…' : 'Resend verification email'}
+              </button>
+            )}
           </div>
         )}
 

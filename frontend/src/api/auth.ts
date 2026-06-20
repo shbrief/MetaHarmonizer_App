@@ -6,6 +6,7 @@ import { apiFetch, setAccessToken } from './http';
 import type {
     ApiTokenCreated,
     ApiTokenInfo,
+    MessageResponse,
     Role,
     SessionInfo,
     TokenResponse,
@@ -19,15 +20,15 @@ export async function register(input: {
     password: string;
     name?: string;
     request_admin?: boolean;
-}): Promise<TokenResponse> {
-    const res = await apiFetch<TokenResponse>('/auth/register', {
+}): Promise<MessageResponse> {
+    // Register no longer logs the user in: non-bootstrap accounts must confirm
+    // their email first. The response is a human-readable next-step message.
+    return apiFetch<MessageResponse>('/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
         skipAuthRetry: true,
     });
-    setAccessToken(res.access_token);
-    return res;
 }
 
 export async function login(input: { email: string; password: string }): Promise<TokenResponse> {
@@ -39,6 +40,44 @@ export async function login(input: { email: string; password: string }): Promise
     });
     setAccessToken(res.access_token);
     return res;
+}
+
+/* ---------- Email verification + password reset ---------- */
+
+export async function verifyEmail(token: string): Promise<MessageResponse> {
+    return apiFetch<MessageResponse>('/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+        skipAuthRetry: true,
+    });
+}
+
+export async function resendVerification(email: string): Promise<MessageResponse> {
+    return apiFetch<MessageResponse>('/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+        skipAuthRetry: true,
+    });
+}
+
+export async function forgotPassword(email: string): Promise<MessageResponse> {
+    return apiFetch<MessageResponse>('/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+        skipAuthRetry: true,
+    });
+}
+
+export async function resetPassword(token: string, password: string): Promise<MessageResponse> {
+    return apiFetch<MessageResponse>('/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+        skipAuthRetry: true,
+    });
 }
 
 /**

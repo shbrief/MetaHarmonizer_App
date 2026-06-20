@@ -170,6 +170,11 @@ export interface TokenResponse {
     user: User;
 }
 
+/** Generic ``{ message }`` envelope (register, verify, reset, …). */
+export interface MessageResponse {
+    message: string;
+}
+
 export interface SessionInfo {
     id: number;
     ip: string | null;
