@@ -137,8 +137,7 @@ The stack is **FastAPI + Postgres 16 + Redis 7** (backend) and **React + Vite** 
 
 - Python 3.11+
 - Node.js 18+
-- PostgreSQL 16 and Redis 7 running locally
-  _(Windows without admin/Docker? see the **portable services** tip below — it sets both up for you.)_
+- PostgreSQL 16 and Redis 7 (step 2 sets these up for you per-OS)
 
 ### 1. Clone + configure
 
@@ -148,13 +147,11 @@ cd metaHarmonizer
 cp .env.example .env
 ```
 
-The defaults in `.env.example` are wired for local dev, so **no edits are
-required** if you use the portable services in step 2. The values you'd only
-change for your own setup:
+The defaults in `.env.example` use the standard Postgres/Redis ports, so on
+**macOS/Linux no edits are required**. The only value you'd tweak for your own
+setup:
 
 ```bash
-DATABASE_URL=...     # already points at the portable Postgres (:5433)
-REDIS_URL=...        # already points at the portable Redis (:6380)
 ALLOWED_EMAIL_DOMAINS=example.com   # who may register; empty = signup closed
 ```
 
@@ -163,26 +160,43 @@ ALLOWED_EMAIL_DOMAINS=example.com   # who may register; empty = signup closed
 
 ### 2. Start Postgres + Redis
 
-Windows, no install or admin rights needed:
+**macOS / Linux** — easiest is to run just the two data services in Docker (the
+app itself still runs natively in steps 3–4; these are tiny Alpine images, no ML
+build):
+
+```bash
+docker compose up -d postgres redis
+```
+
+This starts them on the standard ports with the exact `mh` / `metaharmonizer`
+credentials the default `.env` expects — nothing to edit.
+
+Prefer no Docker? Install natively with Homebrew and create the role + database:
+
+```bash
+brew install postgresql@16 redis
+brew services start postgresql@16
+brew services start redis
+psql postgres -c "CREATE ROLE mh LOGIN PASSWORD 'mh_dev_password' SUPERUSER;"
+createdb -O mh metaharmonizer
+```
+
+**Windows** — portable services, no install or admin rights:
 
 ```powershell
 scripts/dev_services.ps1 setup    # one-time: downloads portable Postgres + Redis, creates the DB
-scripts/dev_services.ps1 start    # portable Postgres (:5433) + Redis (:6380)
+scripts/dev_services.ps1 start
 ```
 
-`setup` is a one-time, no-admin bootstrap (~330 MB download into
-`%LOCALAPPDATA%\mh-dev`). After that, just `start` / `stop` / `status`.
-
-Already run your own Postgres 16 / Redis 7? Skip the script and point
-`DATABASE_URL` / `REDIS_URL` in `.env` at them (the standard `:5432` / `:6379`
-DSNs are noted in the file).
+These use `:5433` / `:6380`; set the matching `DATABASE_URL` / `REDIS_URL` lines
+noted in `.env.example`.
 
 ### 3. Backend
 
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate                # macOS/Linux: source .venv/bin/activate
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 alembic upgrade head                  # create the DB schema (one-off after schema changes)
