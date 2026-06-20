@@ -166,11 +166,16 @@ ALLOWED_EMAIL_DOMAINS=example.com   # who may register; empty = signup closed
 Windows, no install or admin rights needed:
 
 ```powershell
+scripts/dev_services.ps1 setup    # one-time: downloads portable Postgres + Redis, creates the DB
 scripts/dev_services.ps1 start    # portable Postgres (:5433) + Redis (:6380)
 ```
 
-Already run your own Postgres 16 / Redis 7? Point `DATABASE_URL` / `REDIS_URL`
-in `.env` at them (the standard `:5432` / `:6379` DSNs are noted in the file).
+`setup` is a one-time, no-admin bootstrap (~330 MB download into
+`%LOCALAPPDATA%\mh-dev`). After that, just `start` / `stop` / `status`.
+
+Already run your own Postgres 16 / Redis 7? Skip the script and point
+`DATABASE_URL` / `REDIS_URL` in `.env` at them (the standard `:5432` / `:6379`
+DSNs are noted in the file).
 
 ### 3. Backend
 
