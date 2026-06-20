@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, Users, LogOut, Ban, CheckCircle2, ShieldCheck, X } from 'lucide-react';
+import { Shield, Users, LogOut, Ban, CheckCircle2, ShieldCheck, X, MailWarning } from 'lucide-react';
 import { toast } from 'sonner';
 import PageHeader from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -186,17 +186,25 @@ export default function AdminPage() {
                         </select>
                       </td>
                       <td className="px-5 py-3">
-                        {u.is_active ? (
-                          <Badge tone="green">
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Active
-                          </Badge>
-                        ) : (
-                          <Badge tone="rose">
-                            <Ban className="h-3.5 w-3.5" />
-                            Disabled
-                          </Badge>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {u.is_active ? (
+                            <Badge tone="green">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Active
+                            </Badge>
+                          ) : (
+                            <Badge tone="rose">
+                              <Ban className="h-3.5 w-3.5" />
+                              Disabled
+                            </Badge>
+                          )}
+                          {!u.email_verified && (
+                            <Badge tone="amber">
+                              <MailWarning className="h-3.5 w-3.5" />
+                              Unverified
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center justify-end gap-2">
