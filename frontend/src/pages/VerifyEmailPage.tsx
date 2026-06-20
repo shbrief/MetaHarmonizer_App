@@ -46,12 +46,16 @@ export default function VerifyEmailPage() {
       title="Email verification"
       subtitle="Confirming your address."
       footer={
-        <>
-          Back to{' '}
-          <Link to="/login" className="font-semibold text-primary-600 hover:text-primary-700">
-            sign in
-          </Link>
-        </>
+        // While verifying there's no action button yet, so offer an escape hatch.
+        // Once a result button is shown, this link would be redundant.
+        state === 'verifying' ? (
+          <>
+            Back to{' '}
+            <Link to="/login" className="font-semibold text-primary-600 hover:text-primary-700">
+              sign in
+            </Link>
+          </>
+        ) : undefined
       }
     >
       <div className="space-y-4 text-center">
