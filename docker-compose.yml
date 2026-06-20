@@ -51,7 +51,9 @@ services:
     volumes:
       - ./backend:/app          # live code reload in dev
       - engine_cache:/root/.metaharmonizer
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # Run migrations on startup, then serve (idempotent). Postgres is healthy
+    # via depends_on, so a compose-based run needs no separate migrate step.
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
     depends_on:
       postgres:
         condition: service_healthy

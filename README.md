@@ -76,11 +76,12 @@ Download results in three formats: harmonized CSV with standardized column names
                        │ REST API (JSON)
 ┌──────────────────────▼──────────────────────────────┐
 │                 FastAPI Backend                       │
-│  Routers: harmonize, mappings, ontology, quality,    │
-│           export                                     │
+│  Routers: auth, harmonize, mappings, ontology,       │
+│           quality, export, admin, audit, tokens, ws  │
 │  Services: harmonizer (engine wrapper), analytics,   │
 │            exporter                                  │
-│  Database: SQLite with WAL mode                      │
+│  Auth: JWT access/refresh, RBAC, email verification  │
+│  Data: PostgreSQL (SQLAlchemy async) · Redis (jobs)  │
 └──────────────────────┬──────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────┐
@@ -105,9 +106,10 @@ Download results in three formats: harmonized CSV with standardized column names
 
 | Layer         | Technology                                                       |
 | ------------- | ---------------------------------------------------------------- |
-| **Frontend**  | React 18, TypeScript, Tailwind CSS, Recharts, Lucide Icons       |
-| **Backend**   | FastAPI, Pydantic v2, Uvicorn                                    |
-| **Database**  | SQLite (WAL mode, foreign keys, indexes)                         |
+| **Frontend**  | React 18, TypeScript, Tailwind CSS, TanStack Query, Recharts     |
+| **Backend**   | FastAPI, Pydantic v2, SQLAlchemy (async), Alembic, Uvicorn       |
+| **Data**      | PostgreSQL 16 · Redis 7 (job queue / arq, rate limiting, WS)     |
+| **Auth**      | JWT access/refresh, Argon2id, RBAC, email verification (Resend)  |
 | **ML Engine** | SentenceTransformer (`all-MiniLM-L6-v2`), RapidFuzz, NCI EVS API |
 
 ---
@@ -129,25 +131,53 @@ Columns flow through stages sequentially. A high-confidence match at any stage s
 
 ## Quick Start
 
+The stack is **FastAPI + Postgres 16 + Redis 7** (backend) and **React + Vite** (frontend), with JWT auth.
+
 ### Prerequisites
 
 - Python 3.11+
 - Node.js 18+
+- PostgreSQL 16 and Redis 7 running locally
+  _(Windows without admin/Docker? see the **portable services** tip below — it sets both up for you.)_
 
-### Backend
+### 1. Clone + configure
+
+```bash
+git clone https://github.com/AhmedOsamaAli/metaHarmonizer.git
+cd metaHarmonizer
+cp .env.example .env
+```
+
+Edit `.env` and set at least these (the app refuses to boot otherwise):
+
+```bash
+JWT_SECRET=<any-random-string-at-least-32-characters-long>
+ALLOWED_EMAIL_DOMAINS=example.com     # who may register; empty = signup closed
+DATABASE_URL=postgresql+asyncpg://USER:PW@localhost:5432/metaharmonizer
+REDIS_URL=redis://localhost:6379/0
+```
+
+> The **first** account you register becomes the **admin**; everyone after is a
+> curator (an admin can promote them later).
+
+### 2. Backend
 
 ```bash
 cd backend
-python -m venv venv
-venv\Scripts\activate        # Linux/macOS: source venv/bin/activate
+python -m venv .venv
+.venv\Scripts\activate                # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
+alembic upgrade head                  # create the DB schema (one-off after schema changes)
 uvicorn app.main:app --reload --port 8000
 ```
 
-The upstream `metaharmonizer` engine is installed from a pre-built wheel under [backend/vendor/](backend/vendor/README.md) so installation works on Windows, Linux and macOS without any special steps.
+The upstream `metaharmonizer` engine installs from a pre-built wheel under
+[backend/vendor/](backend/vendor/README.md), so it works on Windows, Linux and
+macOS with no special steps. First boot warms an ML model (~1–2 min); set
+`ENGINE_IMPL=mock` in `.env` for instant, ML-free startup during development.
 
-### Frontend
+### 3. Frontend
 
 ```bash
 cd frontend
@@ -155,22 +185,51 @@ npm install
 npm run dev
 ```
 
+The dev server proxies `/api` to `http://localhost:8000`, so no frontend config
+is needed.
+
+> **Windows without Docker/admin rights?** `scripts/dev_services.ps1 start`
+> launches **portable Postgres (:5433) + Redis (:6380)** under `%LOCALAPPDATA%` —
+> no install required. Then set these in `.env`:
+> ```
+> DATABASE_URL=postgresql+asyncpg://mh:mh_dev_password@127.0.0.1:5433/metaharmonizer
+> REDIS_URL=redis://127.0.0.1:6380/0
+> ```
+
+### First run
+
+1. Open the frontend → **Create an account** (email must match `ALLOWED_EMAIL_DOMAINS`).
+2. The **first** user becomes **admin**; later users are curators.
+3. Sign in and upload a study.
+
 | Service            | URL                        |
 | ------------------ | -------------------------- |
 | Frontend           | http://localhost:5173      |
 | Backend API        | http://localhost:8000      |
 | API Docs (Swagger) | http://localhost:8000/docs |
+| Health / Readiness | http://localhost:8000/healthz · http://localhost:8000/readyz |
 
 ---
 
 ## Environment Variables
 
-| Variable                  | Default                                     | Description                                                                                                                                                                                             |
-| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENGINE_IMPL`             | `metaharmonizer`                            | Select the engine adapter. `mock` switches to the deterministic in-process engine used by tests.                                                                                                        |
-| `METAHARMONIZER_DATA_DIR` | `backend/data`                              | Where the upstream package looks for `schema/ncit_descendants.json`, `schema/field_value_dict.json`, and `schema/curated_fields_source_latest_with_flags.csv`. The adapter auto-points here when unset. |
-| `GOOGLE_API_KEY`          | —                                           | Required to enable upstream Stage 4 LLM query rewriting (Gemini).                                                                                                                                       |
-| `FIELD_VALUE_JSON`        | `backend/data/schema/field_value_dict.json` | Override path to the dashboard-owned value-level ontology dictionary.                                                                                                                                   |
+`.env.example` is the canonical, commented catalogue — copy it to `.env`. The
+most important variables:
+
+| Variable                | Required | Default          | Description                                                                 |
+| ----------------------- | :------: | ---------------- | --------------------------------------------------------------------------- |
+| `JWT_SECRET`            | ✅       | —                | Signs access/refresh tokens. **Boot fails if < 32 bytes.**                  |
+| `DATABASE_URL`          | ✅       | local Postgres   | `postgresql+asyncpg://…` DSN.                                               |
+| `REDIS_URL`             | ✅       | local Redis      | Job queue + rate-limit + WS ticket store.                                   |
+| `ALLOWED_EMAIL_DOMAINS` | ✅       | _(empty)_        | Comma-separated signup allow-list. Empty → registration closed.            |
+| `ENGINE_IMPL`           |          | `metaharmonizer` | `mock` switches to the deterministic, ML-free engine (tests/fast dev).      |
+| `JOB_MODE`              |          | `inline`         | `inline` (just uvicorn) or `queue` (arq workers via Redis).                 |
+| `GEMINI_API_KEY`        |          | —                | Enables the engine's optional Stage-4 LLM rematch.                          |
+| `CORS_ORIGINS`          |          | localhost        | Allowed web origins (no wildcards in prod).                                 |
+
+Migrations are managed by **Alembic** and are **not** auto-applied — run
+`alembic upgrade head` after pulling changes that touch the schema.
+
 
 ---
 
@@ -221,17 +280,19 @@ metaHarmonizer/
 │   ├── app/
 │   │   ├── main.py              # FastAPI app entry point
 │   │   ├── models.py            # Pydantic request/response schemas
-│   │   ├── database.py          # SQLite data layer
+│   │   ├── core/                # settings, security, email, deps, jobs
+│   │   ├── db/                  # SQLAlchemy models, session, base
+│   │   ├── repositories/        # async data access (studies, mappings, …)
 │   │   ├── routers/             # API route handlers
 │   │   ├── services/            # Dashboard-owned helpers (ontology, IDs)
 │   │   └── engine_adapter/      # ONLY layer allowed to import upstream
 │   │       ├── protocol.py      # EngineProtocol contract
 │   │       ├── metaharmonizer_impl.py  # Wraps pip-installed upstream pkg
 │   │       └── mock_impl.py     # Deterministic engine for tests
+│   ├── alembic/                 # Database migrations
 │   ├── data/
 │   │   ├── schema/              # Curated dicts shipped to the engine
-│   │   ├── uploads/             # User-uploaded CSVs (gitignored)
-│   │   └── metaharmonizer.db    # Runtime SQLite (gitignored)
+│   │   └── uploads/             # User-uploaded CSVs (gitignored)
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
