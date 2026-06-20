@@ -23,8 +23,7 @@ RESEND_ENDPOINT = "https://api.resend.com/emails"
 async def _send(to: str, subject: str, html: str, *, text_fallback: str) -> None:
     """Send one email via Resend, or log it when no API key is configured."""
     if not settings.resend_api_key:
-        # Dev fallback: no key configured. Surface the content in logs so the
-        # flow is testable locally. In production the key must be set.
+        # No key: log the link so the flow stays testable in local dev.
         logger.warning("email (no RESEND_API_KEY) -> %s | %s\n%s", to, subject, text_fallback)
         return
 

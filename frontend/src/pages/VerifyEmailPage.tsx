@@ -46,8 +46,7 @@ export default function VerifyEmailPage() {
       title="Email verification"
       subtitle="Confirming your address."
       footer={
-        // While verifying there's no action button yet, so offer an escape hatch.
-        // Once a result button is shown, this link would be redundant.
+        // Only an escape hatch while verifying; the result state has its own button.
         state === 'verifying' ? (
           <>
             Back to{' '}
