@@ -148,19 +148,31 @@ cd metaHarmonizer
 cp .env.example .env
 ```
 
-Edit `.env` and set at least these (the app refuses to boot otherwise):
+The defaults in `.env.example` are wired for local dev, so **no edits are
+required** if you use the portable services in step 2. The values you'd only
+change for your own setup:
 
 ```bash
-JWT_SECRET=<any-random-string-at-least-32-characters-long>
-ALLOWED_EMAIL_DOMAINS=example.com     # who may register; empty = signup closed
-DATABASE_URL=postgresql+asyncpg://USER:PW@localhost:5432/metaharmonizer
-REDIS_URL=redis://localhost:6379/0
+DATABASE_URL=...     # already points at the portable Postgres (:5433)
+REDIS_URL=...        # already points at the portable Redis (:6380)
+ALLOWED_EMAIL_DOMAINS=example.com   # who may register; empty = signup closed
 ```
 
-> The **first** account you register becomes the **admin**; everyone after is a
-> curator (an admin can promote them later).
+> Register with any `@example.com` email. The **first** account becomes the
+> **admin**; everyone after is a curator (an admin can promote them later).
 
-### 2. Backend
+### 2. Start Postgres + Redis
+
+Windows, no install or admin rights needed:
+
+```powershell
+scripts/dev_services.ps1 start    # portable Postgres (:5433) + Redis (:6380)
+```
+
+Already run your own Postgres 16 / Redis 7? Point `DATABASE_URL` / `REDIS_URL`
+in `.env` at them (the standard `:5432` / `:6379` DSNs are noted in the file).
+
+### 3. Backend
 
 ```bash
 cd backend
@@ -177,7 +189,7 @@ The upstream `metaharmonizer` engine installs from a pre-built wheel under
 macOS with no special steps. First boot warms an ML model (~1–2 min); set
 `ENGINE_IMPL=mock` in `.env` for instant, ML-free startup during development.
 
-### 3. Frontend
+### 4. Frontend
 
 ```bash
 cd frontend
@@ -187,14 +199,6 @@ npm run dev
 
 The dev server proxies `/api` to `http://localhost:8000`, so no frontend config
 is needed.
-
-> **Windows without Docker/admin rights?** `scripts/dev_services.ps1 start`
-> launches **portable Postgres (:5433) + Redis (:6380)** under `%LOCALAPPDATA%` —
-> no install required. Then set these in `.env`:
-> ```
-> DATABASE_URL=postgresql+asyncpg://mh:mh_dev_password@127.0.0.1:5433/metaharmonizer
-> REDIS_URL=redis://127.0.0.1:6380/0
-> ```
 
 ### First run
 
