@@ -13,7 +13,7 @@ import {
   Cell,
   Cell as PieCell,
 } from 'recharts';
-import { ArrowRight, Columns3, Gauge, ListChecks, Layers, Wrench } from 'lucide-react';
+import { ArrowRight, Columns3, Gauge, ListChecks, Layers, Wrench, CheckCircle2, AlertTriangle, XCircle, Circle } from 'lucide-react';
 import { getQualityMetrics, getStudyMappings } from '../api/client';
 import { useStudies } from '../hooks/queries';
 import PageHeader from '../components/ui/PageHeader';
@@ -23,7 +23,7 @@ import AnimatedNumber from '../components/ui/AnimatedNumber';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 import StageBadge from '../components/StageBadge';
 import StudyPicker from '../components/StudyPicker';
-import type { Mapping } from '../api/types';
+import type { Mapping, QualityMetrics } from '../api/types';
 
 const STAGE_COLORS: Record<string, string> = {
   stage1: '#2986e2',
@@ -93,12 +93,19 @@ export default function QualityDashboard() {
         description="How this study mapped — coverage, confidence, methods, and what still needs review."
       />
 
-      {/* KPI strip — each number is distinct */}
+      {/* Readiness banner + export-blocking checklist — the "is it ready?" answer */}
+      <ReadinessBanner
+        metrics={metrics}
+        onReview={() => navigate(`/review/${studyId}?status=pending`)}
+        onExport={() => navigate(`/export/${studyId}`)}
+      />
+
+      {/* KPI strip — each number is distinct and deep-links into a filtered review */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Kpi icon={<Columns3 className="h-4 w-4" />} label="Columns" value={metrics.total_columns} hint={`${metrics.unmapped_columns} unmapped`} />
-        <Kpi icon={<Layers className="h-4 w-4" />} label="Coverage" value={coverage * 100} decimals={1} suffix="%" hint={`${metrics.mapped_columns} mapped`} tone="text-primary-600" />
-        <Kpi icon={<Gauge className="h-4 w-4" />} label="Avg confidence" value={metrics.avg_confidence * 100} decimals={1} suffix="%" tone="text-accent-600" />
-        <Kpi icon={<ListChecks className="h-4 w-4" />} label="Needs review" value={metrics.pending_review} hint={`${metrics.auto_accepted} accepted`} tone={metrics.pending_review ? 'text-amber-600' : 'text-emerald-600'} />
+        <Kpi icon={<Columns3 className="h-4 w-4" />} label="Columns" value={metrics.total_columns} hint={`${metrics.unmapped_columns} unmapped`} onClick={() => navigate(`/review/${studyId}?status=all`)} />
+        <Kpi icon={<Layers className="h-4 w-4" />} label="Coverage" value={coverage * 100} decimals={1} suffix="%" hint={`${metrics.mapped_columns} mapped`} tone="text-primary-600" onClick={() => navigate(`/review/${studyId}?status=all`)} />
+        <Kpi icon={<Gauge className="h-4 w-4" />} label="Avg confidence" value={metrics.avg_confidence * 100} decimals={1} suffix="%" tone="text-accent-600" onClick={() => navigate(`/review/${studyId}?status=all`)} />
+        <Kpi icon={<ListChecks className="h-4 w-4" />} label="Needs review" value={metrics.pending_review} hint={`${metrics.auto_accepted} accepted`} tone={metrics.pending_review ? 'text-amber-600' : 'text-emerald-600'} onClick={() => navigate(`/review/${studyId}?status=pending`)} />
       </div>
 
       {/* cBioPortal-style widget grid — every chart shows a different thing */}
@@ -270,6 +277,100 @@ function confColor(minVal: number): string {
 
 /* ---------- small presentational pieces ---------- */
 
+function ReadinessBanner({
+  metrics,
+  onReview,
+  onExport,
+}: {
+  metrics: QualityMetrics;
+  onReview: () => void;
+  onExport: () => void;
+}) {
+  const accepted = metrics.auto_accepted;
+  const pending = metrics.pending_review;
+  const unmapped = metrics.unmapped_columns;
+
+  // Each gate: done = satisfied; todo rows are what's blocking a clean export.
+  const checks = [
+    {
+      label: 'At least one mapping confirmed',
+      done: accepted > 0,
+      todo: 'No columns are accepted yet — review and accept matches.',
+      action: accepted > 0 ? undefined : onReview,
+    },
+    {
+      label: 'No columns pending review',
+      done: pending === 0,
+      todo: `${pending} column${pending === 1 ? '' : 's'} still need a decision.`,
+      action: pending === 0 ? undefined : onReview,
+    },
+    {
+      label: 'Every column mapped to a field',
+      done: unmapped === 0,
+      todo: `${unmapped} column${unmapped === 1 ? '' : 's'} could not be mapped (they're dropped from export).`,
+      action: undefined,
+    },
+  ];
+
+  const blocking = accepted === 0;
+  const needsWork = pending > 0;
+  const state = blocking ? 'blocked' : needsWork ? 'review' : 'ready';
+
+  const meta = {
+    ready: { tone: 'border-emerald-200 bg-emerald-50', icon: <CheckCircle2 className="h-5 w-5 text-emerald-600" />, title: 'Ready to export', sub: 'All columns are reviewed and confirmed.' },
+    review: { tone: 'border-amber-200 bg-amber-50', icon: <AlertTriangle className="h-5 w-5 text-amber-600" />, title: 'Needs review', sub: 'Some columns still need a curator decision.' },
+    blocked: { tone: 'border-rose-200 bg-rose-50', icon: <XCircle className="h-5 w-5 text-rose-600" />, title: 'Not ready', sub: 'Nothing is confirmed yet — start reviewing.' },
+  }[state];
+
+  return (
+    <div className={`rounded-2xl border p-4 ${meta.tone}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          {meta.icon}
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">{meta.title}</h2>
+            <p className="text-xs text-slate-600">{meta.sub}</p>
+          </div>
+        </div>
+        {state === 'ready' ? (
+          <button onClick={onExport} className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">
+            Go to export
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <button onClick={onReview} className="flex shrink-0 items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+            Review pending
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      <ul className="mt-3 space-y-1.5 border-t border-black/5 pt-3">
+        {checks.map((c) => (
+          <li key={c.label} className="flex items-center gap-2 text-xs">
+            {c.done ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+            ) : (
+              <Circle className="h-4 w-4 shrink-0 text-slate-300" />
+            )}
+            <span className={c.done ? 'text-slate-500 line-through' : 'font-medium text-slate-700'}>
+              {c.label}
+            </span>
+            {!c.done && (
+              <span className="text-slate-500">— {c.todo}</span>
+            )}
+            {!c.done && c.action && (
+              <button onClick={c.action} className="ml-auto shrink-0 font-semibold text-primary-600 hover:text-primary-700">
+                Fix
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Kpi({
   icon,
   label,
@@ -278,6 +379,7 @@ function Kpi({
   decimals = 0,
   suffix = '',
   tone,
+  onClick,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -286,9 +388,13 @@ function Kpi({
   decimals?: number;
   suffix?: string;
   tone?: string;
+  onClick?: () => void;
 }) {
   return (
-    <Card className="p-4">
+    <Card
+      onClick={onClick}
+      className={`p-4 ${onClick ? 'cursor-pointer transition hover:border-primary-300 hover:shadow-sm' : ''}`}
+    >
       <div className="flex items-center gap-2 text-slate-400">
         {icon}
         <span className="text-xs font-medium text-slate-500">{label}</span>

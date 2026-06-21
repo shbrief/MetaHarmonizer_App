@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Check,
   X,
@@ -55,9 +55,13 @@ export default function MappingReview() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  // Filters — default to "pending" so curators see only actionable items
-  const [filterStage, setFilterStage] = useState<FilterStage>('all');
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('pending');
+  // Filters — default to "pending" so curators see only actionable items.
+  // Deep-links from the Quality dashboard can preset them via ?status= / ?stage=.
+  const [searchParams] = useSearchParams();
+  const initialStatus = (searchParams.get('status') as FilterStatus) || 'pending';
+  const initialStage = (searchParams.get('stage') as FilterStage) || 'all';
+  const [filterStage, setFilterStage] = useState<FilterStage>(initialStage);
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>(initialStatus);
   const [sortKey, setSortKey] = useState<SortKey>('confidence_score');
   const [sortAsc, setSortAsc] = useState(false);
 
