@@ -443,8 +443,9 @@ export default function MappingReview() {
       <div className="flex items-center gap-4 bg-white border border-gray-200 rounded-xl p-3">
         <Filter className="w-4 h-4 text-gray-400" />
         <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-gray-500">Stage:</label>
+          <label htmlFor="stage-filter" className="text-xs font-medium text-gray-500">Stage:</label>
           <select
+            id="stage-filter"
             value={filterStage}
             onChange={(e) => setFilterStage(e.target.value as FilterStage)}
             className="text-sm border border-gray-200 rounded px-2 py-1"
@@ -464,6 +465,7 @@ export default function MappingReview() {
             ref={searchRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search columns"
             placeholder="Search columns…  ( / )"
             className="w-48 rounded border border-gray-200 py-1 pl-7 pr-2 text-sm focus:border-primary-400 focus:outline-none"
           />

@@ -23,7 +23,7 @@ export default function UserMenu() {
 
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white py-1.5 pl-1.5 pr-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 data-[state=open]:bg-slate-50">
+      <DropdownMenu.Trigger aria-label="Account menu" className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white py-1.5 pl-1.5 pr-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 data-[state=open]:bg-slate-50">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary-600 text-white">
           <UserIcon className="h-4 w-4" />
         </span>
