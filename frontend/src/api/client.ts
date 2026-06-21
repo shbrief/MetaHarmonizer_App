@@ -104,6 +104,17 @@ export async function batchUpdateMappings(
     });
 }
 
+/** On-demand Stage-4 LLM rematch for one column. Requires GEMINI_API_KEY on the
+ * server; surfaces a clear error otherwise. Returns ranked field suggestions. */
+export async function llmRematch(
+    mappingId: number,
+): Promise<{ field: string; confidence: number; reasoning: string }[]> {
+    const res = await request<{
+        suggestions: { field: string; confidence: number; reasoning: string }[];
+    }>(`${BASE}/mappings/${mappingId}/llm`, { method: 'POST' });
+    return res.suggestions ?? [];
+}
+
 /* ---------- Quality ---------- */
 
 export async function getQualityMetrics(studyId: string): Promise<QualityMetrics> {
@@ -160,7 +171,10 @@ export async function editOntologyMapping(
 
 /* ---------- Export ---------- */
 
-export function getExportUrl(studyId: string, format: 'harmonized' | 'cbioportal' | 'report'): string {
+export function getExportUrl(
+    studyId: string,
+    format: 'harmonized' | 'cbioportal' | 'cbioportal-study' | 'report',
+): string {
     return `${BASE}/export/${studyId}/${format}`;
 }
 

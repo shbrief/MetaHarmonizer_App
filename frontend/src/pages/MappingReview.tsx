@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfidenceBadge from '../components/ConfidenceBadge';
@@ -27,7 +28,9 @@ import {
   rejectMapping,
   editMapping,
   batchUpdateMappings,
+  llmRematch,
 } from '../api/client';
+import { ApiError } from '../api/http';
 import type { Mapping } from '../api/types';
 
 type SortKey = 'raw_column' | 'confidence_score' | 'stage' | 'status';
@@ -155,6 +158,38 @@ export default function MappingReview() {
     setEditingId(null);
     setEditField('');
     setEditNote('');
+  };
+
+  // 1-click: apply one of the engine's alternative suggestions as the field.
+  const handleApplyAlternative = async (id: number, field: string) => {
+    try {
+      const m = await editMapping(id, field, 'Applied alternative suggestion');
+      updateMapping(m);
+      showToast(`Applied: ${m.raw_column} → ${field}`);
+    } catch {
+      showToast('Failed to apply alternative', 'error');
+    }
+  };
+
+  // On-demand Stage-4 LLM rematch for a stuck column (needs GEMINI_API_KEY).
+  const [llmBusyId, setLlmBusyId] = useState<number | null>(null);
+  const [llmResults, setLlmResults] = useState<Record<number, { field: string; confidence: number; reasoning: string }[]>>({});
+  const handleLlmRematch = async (id: number) => {
+    setLlmBusyId(id);
+    try {
+      const suggestions = await llmRematch(id);
+      setLlmResults((prev) => ({ ...prev, [id]: suggestions }));
+      setExpandedRow(id);
+      showToast(suggestions.length ? `LLM suggested ${suggestions.length} match(es)` : 'LLM returned no suggestions');
+    } catch (err) {
+      const msg =
+        err instanceof ApiError && err.status === 503
+          ? 'LLM matching is not configured on the server (set GEMINI_API_KEY).'
+          : 'LLM rematch failed. Please try again.';
+      showToast(msg, 'error');
+    } finally {
+      setLlmBusyId(null);
+    }
   };
 
   const handleBatch = async (action: 'accepted' | 'rejected') => {
@@ -483,6 +518,14 @@ export default function MappingReview() {
                                     <span className="text-gray-400">
                                       {alt.method}
                                     </span>
+                                    {m.status !== 'accepted' && (
+                                      <button
+                                        onClick={() => handleApplyAlternative(m.id, alt.field)}
+                                        className="ml-auto rounded-md px-2 py-0.5 text-[11px] font-semibold text-primary-600 hover:bg-primary-50"
+                                      >
+                                        Apply
+                                      </button>
+                                    )}
                                   </li>
                                 ))}
                               </ul>
@@ -491,6 +534,37 @@ export default function MappingReview() {
                                 No alternative matches
                               </p>
                             )}
+
+                            {/* On-demand Stage-4 LLM rematch */}
+                            <div className="mt-3 border-t border-gray-200 pt-3">
+                              <button
+                                onClick={() => handleLlmRematch(m.id)}
+                                disabled={llmBusyId === m.id}
+                                className="flex items-center gap-1.5 rounded-md bg-orange-50 px-2.5 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-60"
+                              >
+                                <Sparkles className="h-3.5 w-3.5" />
+                                {llmBusyId === m.id ? 'Asking the LLM…' : 'Try LLM rematch'}
+                              </button>
+                              {llmResults[m.id]?.length > 0 && (
+                                <ul className="mt-2 space-y-1">
+                                  {llmResults[m.id].map((s, i) => (
+                                    <li key={`llm-${s.field}-${i}`} className="flex items-center gap-2">
+                                      <Sparkles className="h-3 w-3 text-orange-400" />
+                                      <span className="font-mono text-orange-700">{s.field}</span>
+                                      <ConfidenceBadge score={s.confidence} size="sm" />
+                                      {m.status !== 'accepted' && (
+                                        <button
+                                          onClick={() => handleApplyAlternative(m.id, s.field)}
+                                          className="ml-auto rounded-md px-2 py-0.5 text-[11px] font-semibold text-orange-600 hover:bg-orange-50"
+                                        >
+                                          Apply
+                                        </button>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
                           </div>
                           <div>
                             <h4 className="font-semibold text-gray-700 mb-2">

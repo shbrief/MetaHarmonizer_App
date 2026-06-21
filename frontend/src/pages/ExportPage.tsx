@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { Download, FileText, Database, FileJson, CircleCheck } from 'lucide-react';
+import { Download, FileText, Database, FileJson, FolderArchive, CircleCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { getExportUrl } from '../api/client';
 import { useCompleteStudy, useStudies } from '../hooks/queries';
@@ -43,6 +43,13 @@ export default function ExportPage() {
       desc: 'Tab-separated file with cBioPortal clinical header lines, ready for the importer.',
       format: 'cbioportal' as const,
       tone: 'bg-primary-50 text-primary-600',
+    },
+    {
+      icon: FolderArchive,
+      title: 'cBioPortal Study Folder (ZIP)',
+      desc: 'Full study folder (meta + clinical data files), ready to run through validateData.py.',
+      format: 'cbioportal-study' as const,
+      tone: 'bg-indigo-50 text-indigo-600',
     },
     {
       icon: FileJson,
