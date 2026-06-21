@@ -69,6 +69,21 @@ export async function getStudyMappings(studyId: string): Promise<Mapping[]> {
     return request<Mapping[]>(`${BASE}/mappings/${studyId}`);
 }
 
+/** Active-learning review queue (G7): pending mappings ordered risky-first and
+ * grouped by suggested target so look-alikes are adjacent and batchable. */
+export interface ReviewQueueItem extends Mapping {
+    group_key: string;
+    group_size: number;
+    group_min_confidence: number;
+}
+export interface ReviewQueue {
+    items: ReviewQueueItem[];
+    stats: { pending: number; groups: number; batchable_groups: number; risky: number };
+}
+export async function getReviewQueue(studyId: string): Promise<ReviewQueue> {
+    return request<ReviewQueue>(`${BASE}/mappings/${studyId}/review-queue`);
+}
+
 export async function acceptMapping(mappingId: number): Promise<Mapping> {
     return request<Mapping>(`${BASE}/mappings/${mappingId}/accept`, {
         method: 'POST',

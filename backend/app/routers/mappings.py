@@ -23,6 +23,7 @@ from app.models import (
 from app.repositories import audit as audit_repo
 from app.repositories import mappings as mappings_repo
 from app.repositories import studies as studies_repo
+from app.services import active_learning
 
 router = APIRouter(prefix="/api/v1/mappings", tags=["mappings"])
 
@@ -35,6 +36,24 @@ async def get_study_mappings(study_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Study not found")
     mappings = await mappings_repo.get_mappings(db, study_id)
     return mappings
+
+
+@router.get("/{study_id}/review-queue")
+async def get_review_queue(study_id: str, db: AsyncSession = Depends(get_db)):
+    """Active-learning review queue (G7): pending mappings ordered risky-first
+    and grouped by suggested target so look-alikes are adjacent and batchable.
+
+    Returns ``{ items, stats }``. ``items`` are pending mappings each annotated
+    with ``group_key`` / ``group_size`` / ``group_min_confidence``; ``stats``
+    summarizes the queue shape (pending, groups, batchable_groups, risky).
+    Ordering only — no mapping is changed or hidden.
+    """
+    study = await studies_repo.get_study(db, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    mappings = await mappings_repo.get_mappings(db, study_id)
+    queue = active_learning.build_review_queue(mappings)
+    return {"items": queue, "stats": active_learning.queue_stats(queue)}
 
 
 @router.post("/{mapping_id}/accept", response_model=MappingOut)

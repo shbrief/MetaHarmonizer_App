@@ -30,6 +30,7 @@ import {
   editMapping,
   batchUpdateMappings,
   llmRematch,
+  getReviewQueue,
 } from '../api/client';
 import { ApiError } from '../api/http';
 import type { Mapping } from '../api/types';
@@ -70,6 +71,13 @@ export default function MappingReview() {
   const [sortAsc, setSortAsc] = useState(false);
   const [search, setSearch] = useState('');
 
+  // Active-learning "smart review" (G7): order risky-first and keep look-alikes
+  // (same suggested target) adjacent so a curator can batch a whole group. Off
+  // by default — it's assistive ordering, never enforced.
+  const [smartOrder, setSmartOrder] = useState(false);
+  const [groupInfo, setGroupInfo] = useState<Record<number, { key: string; size: number; min: number }>>({});
+  const [queueStats, setQueueStats] = useState<{ groups: number; batchable_groups: number; risky: number } | null>(null);
+
   // Keyboard navigation: index of the focused row within the filtered list.
   const [cursor, setCursor] = useState(0);
   const searchRef = React.useRef<HTMLInputElement>(null);
@@ -94,6 +102,26 @@ export default function MappingReview() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [selectedId]);
+
+  // Load the active-learning queue (group metadata + stats) when smart order is
+  // on. Re-runs when mappings change so the grouping reflects cleared decisions.
+  useEffect(() => {
+    if (!selectedId || !smartOrder) {
+      setGroupInfo({});
+      setQueueStats(null);
+      return;
+    }
+    getReviewQueue(selectedId)
+      .then((q) => {
+        const info: Record<number, { key: string; size: number; min: number }> = {};
+        for (const it of q.items) {
+          info[it.id] = { key: it.group_key, size: it.group_size, min: it.group_min_confidence };
+        }
+        setGroupInfo(info);
+        setQueueStats(q.stats);
+      })
+      .catch(console.error);
+  }, [selectedId, smartOrder, mappings]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') =>
     type === 'success' ? toast.success(message) : toast.error(message);
@@ -121,8 +149,26 @@ export default function MappingReview() {
       if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
       return sortAsc ? av - bv : bv - av;
     });
+    // Smart review order (G7): override the column sort — riskiest group first,
+    // look-alikes (same group) kept adjacent, so a curator can batch a group.
+    if (smartOrder && Object.keys(groupInfo).length > 0) {
+      result.sort((a, b) => {
+        const ga = groupInfo[a.id];
+        const gb = groupInfo[b.id];
+        // Rows without group info (already reviewed) sink to the bottom.
+        if (!ga && !gb) return 0;
+        if (!ga) return 1;
+        if (!gb) return -1;
+        if (ga.min !== gb.min) return ga.min - gb.min; // riskiest group first
+        if (ga.key !== gb.key) return ga.key.localeCompare(gb.key); // keep group together
+        const ca = a.confidence_score ?? 0;
+        const cb = b.confidence_score ?? 0;
+        if (ca !== cb) return ca - cb; // within group, riskiest first
+        return a.raw_column.localeCompare(b.raw_column);
+      });
+    }
     return result;
-  }, [mappings, filterStage, filterStatus, sortKey, sortAsc, search]);
+  }, [mappings, filterStage, filterStatus, sortKey, sortAsc, search, smartOrder, groupInfo]);
 
   // Per-stage counts for the distribution bar (full study, not the filtered view).
   const stageCounts = useMemo(() => {
@@ -235,6 +281,16 @@ export default function MappingReview() {
     } else {
       setSelected(new Set(filteredMappings.map((m) => m.id)));
     }
+  };
+
+  // Select every pending mapping in the same active-learning group (so the
+  // batch Accept/Reject toolbar can clear the whole look-alike set at once).
+  const selectGroup = (groupKey: string) => {
+    const ids = filteredMappings
+      .filter((m) => m.status === 'pending' && groupInfo[m.id]?.key === groupKey)
+      .map((m) => m.id);
+    setSelected(new Set(ids));
+    if (ids.length > 1) toast.success(`Selected ${ids.length} in this group — use the batch buttons.`);
   };
 
   const toggleSort = (key: SortKey) => {
@@ -470,6 +526,25 @@ export default function MappingReview() {
             className="w-48 rounded border border-gray-200 py-1 pl-7 pr-2 text-sm focus:border-primary-400 focus:outline-none"
           />
         </div>
+        <button
+          onClick={() => setSmartOrder((v) => !v)}
+          aria-pressed={smartOrder}
+          title="Order risky mappings first and keep look-alikes together so you can batch a whole group"
+          className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition ${
+            smartOrder
+              ? 'border-primary-300 bg-primary-50 text-primary-700'
+              : 'border-gray-200 text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Smart review
+        </button>
+        {smartOrder && queueStats && (
+          <span className="text-xs text-gray-500">
+            {queueStats.risky} risky · {queueStats.batchable_groups} batchable group
+            {queueStats.batchable_groups === 1 ? '' : 's'}
+          </span>
+        )}
         <span className="text-xs text-gray-400 ml-auto">
           {filteredMappings.length} of {mappings.length} shown
         </span>
@@ -537,6 +612,15 @@ export default function MappingReview() {
                     <td className="px-3 py-2.5 font-mono text-xs text-primary-700">
                       {m.curator_field || m.matched_field || (
                         <span className="text-gray-400 italic">unmapped</span>
+                      )}
+                      {smartOrder && m.status === 'pending' && (groupInfo[m.id]?.size ?? 0) > 1 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); selectGroup(groupInfo[m.id].key); }}
+                          title="Select all pending look-alikes in this group for a batch decision"
+                          className="ml-2 rounded-full bg-primary-50 px-1.5 py-0.5 text-[10px] font-semibold text-primary-600 hover:bg-primary-100"
+                        >
+                          ⌄ {groupInfo[m.id].size} in group
+                        </button>
                       )}
                     </td>
                     <td className="px-3 py-2.5">
