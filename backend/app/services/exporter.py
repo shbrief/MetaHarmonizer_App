@@ -28,6 +28,38 @@ from app.repositories import studies as studies_repo
 # cBioPortal auto-populates these; they must not appear in a clinical data file.
 BANNED_ATTRS: set[str] = {"MUTATION_COUNT", "FRACTION_GENOME_ALTERED"}
 
+# Patient-level clinical attributes (cBioPortal convention). When a study is
+# exported as a folder, these go to data_clinical_patient.txt and everything
+# else (that isn't an ID) goes to data_clinical_sample.txt. Survival columns
+# (``*_STATUS`` / ``*_MONTHS``) are always patient-level.
+PATIENT_LEVEL_ATTRS: set[str] = {
+    "SEX",
+    "GENDER",
+    "AGE",
+    "AGE_AT_DIAGNOSIS",
+    "RACE",
+    "ETHNICITY",
+    "ANCESTRY",
+    "VITAL_STATUS",
+    "OS_STATUS",
+    "OS_MONTHS",
+    "DFS_STATUS",
+    "DFS_MONTHS",
+    "PFS_STATUS",
+    "PFS_MONTHS",
+    "DSS_STATUS",
+    "DSS_MONTHS",
+}
+
+
+def _is_patient_level(target_id: str) -> bool:
+    """True if a cBioPortal attribute belongs in the patient clinical file."""
+    if target_id in PATIENT_LEVEL_ATTRS:
+        return True
+    # Survival pairs use a free PREFIX (e.g. ``OS_STATUS`` / ``RFS_MONTHS``).
+    return target_id.endswith("_STATUS") or target_id.endswith("_MONTHS")
+
+
 # cBioPortal IDs allow only letters, numbers, points, underscores and hyphens.
 _ID_INVALID = re.compile(r"[^A-Za-z0-9._-]")
 
@@ -165,33 +197,39 @@ async def _build_value_rewrites(
 # cBioPortal Format
 # ---------------------------------------------------------------------------
 
-async def export_cbioportal(
-    db: AsyncSession, study_id: str, raw_df: pd.DataFrame
-) -> str:
+_HIGH_PRIORITY_ATTRS: set[str] = {
+    "PATIENT_ID", "SAMPLE_ID", "CANCER_TYPE", "CANCER_TYPE_DETAILED",
+    "GENDER", "SEX", "AGE", "OS_STATUS", "OS_MONTHS", "TUMOR_SITE",
+}
+
+
+def _infer_dtype(series: pd.Series) -> str:
+    """Infer a cBioPortal data type (NUMBER / BOOLEAN / STRING) for a column."""
+    non_null = series.dropna()
+    try:
+        pd.to_numeric(non_null)
+        return "NUMBER"
+    except (ValueError, TypeError):
+        pass
+    try:
+        unique_vals = set(non_null.astype(str).str.lower().unique())
+    except (AttributeError, TypeError):
+        unique_vals = set()
+    if unique_vals and unique_vals <= {"true", "false", "yes", "no", "0", "1"}:
+        return "BOOLEAN"
+    return "STRING"
+
+
+def _clinical_column_specs(
+    mappings: list[dict[str, Any]], raw_df: pd.DataFrame
+) -> list[dict[str, Any]]:
+    """Build cBioPortal column specs from accepted/pending mappings.
+
+    Excludes PATIENT_ID / SAMPLE_ID (injected per-file by the caller) and
+    banned auto-populated attributes; dedupes by target column.
     """
-    Produce a cBioPortal-format clinical sample data file.
-
-    Follows the official cBioPortal file format specification:
-    https://docs.cbioportal.org/file-formats/#clinical-data
-
-    cBioPortal clinical data files require:
-      Row 1: #Display names
-      Row 2: #Descriptions (longer description of each attribute)
-      Row 3: #Data types (STRING, NUMBER, or BOOLEAN)
-      Row 4: #Priority (numeric; higher = more prominent in UI)
-      Row 5: Column attribute IDs (UPPER_CASE, no # prefix)
-      Row 6+: Data rows (tab-separated)
-
-    Required columns for sample-level data:
-      - PATIENT_ID: unique patient identifier
-      - SAMPLE_ID: unique sample identifier
-    """
-    mappings = await mappings_repo.get_mappings(db, study_id)
-
-    # Build column list from accepted / mapped
     cols: list[dict[str, Any]] = []
     seen_targets: set[str] = set()
-
     for m in mappings:
         target = m.get("curator_field") or m.get("matched_field")
         if not target:
@@ -201,95 +239,62 @@ async def export_cbioportal(
         raw = m["raw_column"]
         if raw not in raw_df.columns:
             continue
-
         target_id = target.upper().replace(" ", "_")
-
-        # Skip banned (auto-populated) attributes
-        if target_id in BANNED_ATTRS:
+        if target_id in BANNED_ATTRS or target_id in {"PATIENT_ID", "SAMPLE_ID"}:
             continue
-
-        # Skip duplicate target columns
         if target_id in seen_targets:
             continue
         seen_targets.add(target_id)
-
-        # Determine data type
-        dtype = "STRING"
-        try:
-            pd.to_numeric(raw_df[raw].dropna())
-            dtype = "NUMBER"
-        except (ValueError, TypeError):
-            # Check for boolean-like columns
-            unique_vals = set(raw_df[raw].dropna().str.lower().unique())
-            if unique_vals and unique_vals <= {"true", "false", "yes", "no", "0", "1"}:
-                dtype = "BOOLEAN"
-
-        # Priority: well-known cBioPortal attributes get higher priority
-        priority = 1
-        high_priority_attrs = {
-            "PATIENT_ID", "SAMPLE_ID", "CANCER_TYPE", "CANCER_TYPE_DETAILED",
-            "GENDER", "SEX", "AGE", "OS_STATUS", "OS_MONTHS", "TUMOR_SITE",
-        }
-        if target_id in high_priority_attrs:
-            priority = 10
-
         cols.append(
             {
                 "raw": raw,
                 "target": target_id,
                 "display": target.replace("_", " ").title(),
                 "description": target.replace("_", " ").capitalize(),
-                "dtype": dtype,
-                "priority": priority,
+                "dtype": _infer_dtype(raw_df[raw]),
+                "priority": 10 if target_id in _HIGH_PRIORITY_ATTRS else 1,
             }
         )
+    return cols
 
-    if not cols:
-        return "# No mappings available for export\n"
 
-    # ---------------------------------------------------------------
-    # Ensure required columns PATIENT_ID and SAMPLE_ID are present.
-    # cBioPortal sample clinical data REQUIRES both.
-    # If the schema mapper matched subject_id or sample_id, they'll
-    # already be in `cols`.  Otherwise, we synthesize them from
-    # available data.
-    # ---------------------------------------------------------------
-    target_ids = {c["target"] for c in cols}
+def _id_spec(
+    target_id: str, raw_src: str, display: str, description: str
+) -> dict[str, Any]:
+    return {
+        "raw": raw_src,
+        "target": target_id,
+        "display": display,
+        "description": description,
+        "dtype": "STRING",
+        "priority": 10,
+    }
 
-    if "PATIENT_ID" not in target_ids:
-        # Try to find a suitable source column in the raw data
-        patient_src = _find_id_column(raw_df, ["subject_id", "patient_id", "participant_id", "case_id"])
-        cols.insert(0, {
-            "raw": patient_src,
-            "target": "PATIENT_ID",
-            "display": "Patient Identifier",
-            "description": "Unique patient identifier",
-            "dtype": "STRING",
-            "priority": 10,
-        })
-    else:
-        # Move PATIENT_ID to front
-        idx = next(i for i, c in enumerate(cols) if c["target"] == "PATIENT_ID")
-        cols.insert(0, cols.pop(idx))
 
-    if "SAMPLE_ID" not in target_ids:
-        # Try to find a suitable source column in the raw data
-        sample_src = _find_id_column(raw_df, ["sample_id", "run_id", "sampleid", "accession"])
-        pos = 1  # right after PATIENT_ID
-        cols.insert(pos, {
-            "raw": sample_src,
-            "target": "SAMPLE_ID",
-            "display": "Sample Identifier",
-            "description": "Unique sample identifier",
-            "dtype": "STRING",
-            "priority": 10,
-        })
-    else:
-        # Move SAMPLE_ID to position 1 (right after PATIENT_ID)
-        idx = next(i for i, c in enumerate(cols) if c["target"] == "SAMPLE_ID")
-        if idx != 1:
-            cols.insert(1, cols.pop(idx))
+def _id_raw_source(
+    mappings: list[dict[str, Any]],
+    raw_df: pd.DataFrame,
+    target_id: str,
+    fallback_candidates: list[str],
+) -> str:
+    """Find the raw column feeding an ID attribute: a matched mapping or a heuristic."""
+    for m in mappings:
+        target = m.get("curator_field") or m.get("matched_field")
+        if not target:
+            continue
+        if target.upper().replace(" ", "_") == target_id and m.get("raw_column") in raw_df.columns:
+            return m["raw_column"]
+    return _find_id_column(raw_df, fallback_candidates)
 
+
+def _write_clinical_tsv(cols: list[dict[str, Any]], raw_df: pd.DataFrame) -> str:
+    """Write a cBioPortal 5-row-header clinical TSV for the given column specs."""
+    targets = {c["target"] for c in cols}
+    survival_status_with_months = {
+        c["target"]
+        for c in cols
+        if c["target"].endswith("_STATUS") and f"{c['target'][:-7]}_MONTHS" in targets
+    }
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
 
@@ -300,19 +305,12 @@ async def export_cbioportal(
             row[0] = "#" + row[0]
         writer.writerow(row)
 
-    # Row 1: Display names
     _header_row([c["display"] for c in cols])
-    # Row 2: Descriptions (distinct from display names per spec)
     _header_row([c["description"] for c in cols])
-    # Row 3: Data types
     _header_row([c["dtype"] for c in cols])
-    # Row 4: Priority
     _header_row([str(c["priority"]) for c in cols])
+    writer.writerow([c["target"] for c in cols])  # attribute IDs (no '#')
 
-    # Row 5: Column attribute IDs (no # prefix, UPPER_CASE)
-    writer.writerow([c["target"] for c in cols])
-
-    # Row 6+: Data rows, with per-column value normalization
     for _, row in raw_df.iterrows():
         out_row: list[str] = []
         for c in cols:
@@ -320,15 +318,49 @@ async def export_cbioportal(
             target_id = c["target"]
             if target_id in ("PATIENT_ID", "SAMPLE_ID"):
                 out_row.append(_sanitize_id(raw_val))
-            elif target_id.endswith("_STATUS") and f"{target_id[:-7]}_MONTHS" in seen_targets:
+            elif target_id in survival_status_with_months:
                 out_row.append(_normalize_survival(raw_val))
             else:
-                # pandas NaN is not None, so guard with isna to avoid writing
-                # the literal string "nan"; cBioPortal expects an empty cell.
+                # pandas NaN is not None; guard with isna so a missing value is
+                # an empty cell, not the literal string "nan".
                 out_row.append("" if pd.isna(raw_val) else str(raw_val))
         writer.writerow(out_row)
 
     return buf.getvalue()
+
+
+async def export_cbioportal(
+    db: AsyncSession, study_id: str, raw_df: pd.DataFrame
+) -> str:
+    """
+    Produce a single cBioPortal-format clinical data file (all attributes in
+    one sample-level file), per the official spec:
+    https://docs.cbioportal.org/file-formats/#clinical-data
+
+    Header rows: display names, descriptions, data types, priority, then the
+    UPPER_CASE attribute IDs. PATIENT_ID and SAMPLE_ID are always present.
+    """
+    mappings = await mappings_repo.get_mappings(db, study_id)
+    specs = _clinical_column_specs(mappings, raw_df)
+
+    patient_src = _id_raw_source(
+        mappings, raw_df, "PATIENT_ID",
+        ["subject_id", "patient_id", "participant_id", "case_id"],
+    )
+    sample_src = _id_raw_source(
+        mappings, raw_df, "SAMPLE_ID",
+        ["sample_id", "run_id", "sampleid", "accession"],
+    )
+
+    if not specs and raw_df.columns.empty:
+        return "# No mappings available for export\n"
+
+    cols = [
+        _id_spec("PATIENT_ID", patient_src, "Patient Identifier", "Unique patient identifier"),
+        _id_spec("SAMPLE_ID", sample_src, "Sample Identifier", "Unique sample identifier"),
+        *specs,
+    ]
+    return _write_clinical_tsv(cols, raw_df)
 
 
 # ---------------------------------------------------------------------------
@@ -345,12 +377,12 @@ def _meta_study(cancer_study_identifier: str, name: str, description: str) -> st
     )
 
 
-def _meta_clinical_sample(cancer_study_identifier: str) -> str:
+def _meta_clinical(cancer_study_identifier: str, datatype: str, data_filename: str) -> str:
     return (
         f"cancer_study_identifier: {cancer_study_identifier}\n"
         f"genetic_alteration_type: CLINICAL\n"
-        f"datatype: SAMPLE_ATTRIBUTES\n"
-        f"data_filename: data_clinical_sample.txt\n"
+        f"datatype: {datatype}\n"
+        f"data_filename: {data_filename}\n"
     )
 
 
@@ -364,11 +396,17 @@ async def export_cbioportal_study(
     Produce a cBioPortal study folder as a zip, ready for ``validateData.py``:
 
         meta_study.txt
+        meta_clinical_patient.txt
+        data_clinical_patient.txt
         meta_clinical_sample.txt
         data_clinical_sample.txt
 
-    ``validateData.py`` validates a study directory with meta files, not a lone
-    TSV, so this is the artifact a curator actually runs the validator against.
+    The clinical attributes are split per the curation checklist ("the clinical
+    file should be split to patient and sample level attribute files"):
+    patient-level attributes (sex, survival, age, ancestry, ...) go to the
+    patient file with one row per unique patient; everything else goes to the
+    sample file with one row per sample. PATIENT_ID appears in both so samples
+    link to patients.
     """
     study = await studies_repo.get_study(db, study_id) or {}
     identifier = cancer_study_identifier or _sanitize_id(
@@ -377,12 +415,50 @@ async def export_cbioportal_study(
     name = study.get("name") or study_id
     description = study.get("description") or f"Harmonized clinical data for {name}."
 
-    data_clinical_sample = await export_cbioportal(db, study_id, raw_df)
+    mappings = await mappings_repo.get_mappings(db, study_id)
+    specs = _clinical_column_specs(mappings, raw_df)
+
+    patient_src = _id_raw_source(
+        mappings, raw_df, "PATIENT_ID",
+        ["subject_id", "patient_id", "participant_id", "case_id"],
+    )
+    sample_src = _id_raw_source(
+        mappings, raw_df, "SAMPLE_ID",
+        ["sample_id", "run_id", "sampleid", "accession"],
+    )
+
+    patient_id_spec = _id_spec(
+        "PATIENT_ID", patient_src, "Patient Identifier", "Unique patient identifier"
+    )
+    sample_id_spec = _id_spec(
+        "SAMPLE_ID", sample_src, "Sample Identifier", "Unique sample identifier"
+    )
+
+    patient_attr_specs = [s for s in specs if _is_patient_level(s["target"])]
+    sample_attr_specs = [s for s in specs if not _is_patient_level(s["target"])]
+
+    # Patient file: one row per unique patient (cBioPortal requires unique
+    # PATIENT_ID rows). Sample file: one row per sample, PATIENT_ID links back.
+    patient_cols = [patient_id_spec, *patient_attr_specs]
+    sample_cols = [patient_id_spec, sample_id_spec, *sample_attr_specs]
+
+    patient_df = raw_df.drop_duplicates(subset=[patient_src]) if patient_src in raw_df.columns else raw_df
+
+    data_clinical_patient = _write_clinical_tsv(patient_cols, patient_df)
+    data_clinical_sample = _write_clinical_tsv(sample_cols, raw_df)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("meta_study.txt", _meta_study(identifier, name, description))
-        zf.writestr("meta_clinical_sample.txt", _meta_clinical_sample(identifier))
+        zf.writestr(
+            "meta_clinical_patient.txt",
+            _meta_clinical(identifier, "PATIENT_ATTRIBUTES", "data_clinical_patient.txt"),
+        )
+        zf.writestr("data_clinical_patient.txt", data_clinical_patient)
+        zf.writestr(
+            "meta_clinical_sample.txt",
+            _meta_clinical(identifier, "SAMPLE_ATTRIBUTES", "data_clinical_sample.txt"),
+        )
         zf.writestr("data_clinical_sample.txt", data_clinical_sample)
     return buf.getvalue()
 
