@@ -228,3 +228,20 @@ export async function adminPromoteSchemaVersion(
 ): Promise<{ id: number; label: string; is_current: boolean }> {
     return apiFetch(`/admin/schema-versions/${versionId}/promote`, { method: 'POST' });
 }
+
+export interface SchemaDiff {
+    from: { id: number; label: string };
+    to: { id: number; label: string };
+    added_fields: { field: string; value_count: number }[];
+    removed_fields: { field: string; value_count: number }[];
+    changed_fields: { field: string; added_values: string[]; removed_values: string[] }[];
+    summary: { added: number; removed: number; changed: number; unchanged: number };
+}
+
+export async function adminDiffSchemaVersions(
+    fromId: number,
+    toId: number,
+): Promise<SchemaDiff> {
+    const params = new URLSearchParams({ from_id: String(fromId), to_id: String(toId) });
+    return apiFetch<SchemaDiff>(`/admin/schema-versions/diff?${params}`);
+}

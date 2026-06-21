@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { Shield, Users, LogOut, Ban, CheckCircle2, ShieldCheck, X, MailWarning, Layers, Upload, CheckCheck } from 'lucide-react';
+import { Shield, Users, LogOut, Ban, CheckCircle2, ShieldCheck, X, MailWarning, Layers, Upload, CheckCheck, GitCompare } from 'lucide-react';
 import { toast } from 'sonner';
 import PageHeader from '../components/ui/PageHeader';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
@@ -18,7 +18,9 @@ import {
   adminSetActive,
   adminSetRole,
   adminUploadSchemaVersion,
+  adminDiffSchemaVersions,
 } from '../api/auth';
+import type { SchemaDiff } from '../api/auth';
 import type { Role, User } from '../api/types';
 
 const ROLES: Role[] = ['curator', 'admin'];
@@ -270,6 +272,16 @@ function SchemaVersionsCard() {
   const [label, setLabel] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
+  // Schema diff (G6 layer A): compare two versions' curated-fields dictionaries.
+  const [fromId, setFromId] = useState<number | null>(null);
+  const [toId, setToId] = useState<number | null>(null);
+  const [diff, setDiff] = useState<SchemaDiff | null>(null);
+  const diffM = useMutation({
+    mutationFn: () => adminDiffSchemaVersions(fromId!, toId!),
+    onSuccess: setDiff,
+    onError: (e: any) => toast.error(e?.message ?? 'Could not compute diff'),
+  });
+
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'schema-versions'] });
 
   const uploadM = useMutation({
@@ -378,6 +390,105 @@ function SchemaVersionsCard() {
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Schema diff (G6 layer A) */}
+        {(versions.data?.length ?? 0) >= 2 && (
+          <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-700">
+              <GitCompare className="h-4 w-4" />
+              Compare versions
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <select
+                aria-label="From version"
+                value={fromId ?? ''}
+                onChange={(e) => setFromId(Number(e.target.value) || null)}
+                className="rounded border border-slate-200 px-2 py-1.5 text-sm"
+              >
+                <option value="">From…</option>
+                {versions.data!.map((v) => (
+                  <option key={v.id} value={v.id}>{v.label}</option>
+                ))}
+              </select>
+              <span className="text-slate-400">→</span>
+              <select
+                aria-label="To version"
+                value={toId ?? ''}
+                onChange={(e) => setToId(Number(e.target.value) || null)}
+                className="rounded border border-slate-200 px-2 py-1.5 text-sm"
+              >
+                <option value="">To…</option>
+                {versions.data!.map((v) => (
+                  <option key={v.id} value={v.id}>{v.label}</option>
+                ))}
+              </select>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={diffM.isPending}
+                disabled={!fromId || !toId || fromId === toId}
+                onClick={() => diffM.mutate()}
+                icon={<GitCompare className="h-4 w-4" />}
+              >
+                Compare
+              </Button>
+            </div>
+
+            {diff && (
+              <div className="mt-3 space-y-2 text-sm">
+                <p className="text-xs text-slate-500">
+                  <span className="font-mono">{diff.from.label}</span> → <span className="font-mono">{diff.to.label}</span>:
+                  {' '}{diff.summary.added} added · {diff.summary.removed} removed · {diff.summary.changed} changed · {diff.summary.unchanged} unchanged
+                </p>
+                {diff.added_fields.length > 0 && (
+                  <div>
+                    <span className="text-xs font-semibold text-emerald-700">Added fields</span>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {diff.added_fields.map((f) => (
+                        <span key={f.field} className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-xs text-emerald-700">
+                          {f.field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {diff.removed_fields.length > 0 && (
+                  <div>
+                    <span className="text-xs font-semibold text-red-700">Removed fields</span>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {diff.removed_fields.map((f) => (
+                        <span key={f.field} className="rounded bg-red-50 px-1.5 py-0.5 font-mono text-xs text-red-700 line-through">
+                          {f.field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {diff.changed_fields.length > 0 && (
+                  <div>
+                    <span className="text-xs font-semibold text-amber-700">Changed allowed values</span>
+                    <ul className="mt-1 space-y-1">
+                      {diff.changed_fields.map((c) => (
+                        <li key={c.field} className="text-xs">
+                          <span className="font-mono font-medium text-slate-700">{c.field}</span>
+                          {c.added_values.length > 0 && (
+                            <span className="text-emerald-700"> +{c.added_values.join(', ')}</span>
+                          )}
+                          {c.removed_values.length > 0 && (
+                            <span className="text-red-700"> −{c.removed_values.join(', ')}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {diff.summary.added === 0 && diff.summary.removed === 0 && diff.summary.changed === 0 && (
+                  <p className="text-xs text-slate-400">No differences — the two schemas are identical.</p>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </CardBody>
     </Card>

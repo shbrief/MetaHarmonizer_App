@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import ForbiddenError, actor_label, require_role
 from app.core.errors import NotFoundError
-from app.db.models import User
+from app.db.models import SchemaVersion, User
 from app.db.session import get_db
 from app.repositories import audit as audit_repo
 from app.repositories import schema_versions as schema_repo
@@ -240,3 +240,32 @@ async def promote_schema_version(
     )
     await db.commit()
     return {"id": version.id, "label": version.label, "is_current": True}
+
+
+@router.get("/schema-versions/diff")
+async def diff_schema_versions(
+    from_id: int,
+    to_id: int,
+    _admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Schema-vs-schema diff (G6, layer A): what changed in the curated-fields
+    dictionary between two versions — fields added/removed and fields whose
+    allowed-value vocabulary changed. Read-only; does not affect any study."""
+    from app.services import schema_diff
+
+    old = await db.get(SchemaVersion, from_id)
+    new = await db.get(SchemaVersion, to_id)
+    if not old or not new:
+        raise NotFoundError("Schema version not found.")
+    if not old.source_path or not Path(old.source_path).exists():
+        raise HTTPException(status_code=404, detail=f"Source CSV missing for version '{old.label}'.")
+    if not new.source_path or not Path(new.source_path).exists():
+        raise HTTPException(status_code=404, detail=f"Source CSV missing for version '{new.label}'.")
+
+    result = schema_diff.diff_csv_files(old.source_path, new.source_path)
+    return {
+        "from": {"id": old.id, "label": old.label},
+        "to": {"id": new.id, "label": new.label},
+        **result,
+    }
