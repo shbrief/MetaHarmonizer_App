@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "metaharmonizer-mcp"
+version = "0.1.0"
+description = "MCP server exposing the MetaHarmonizer engine as three tools (harmonize_table, harmonize_columns, harmonize_values)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MetaHarmonizer" }]
+keywords = ["mcp", "metaharmonizer", "cbioportal", "harmonization", "ontology"]
+
+dependencies = [
+    "mcp>=1.2.0",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+# The real engine (heavy: torch + sentence-transformers). Omit for the mock
+# engine used in tests and demos (ENGINE_IMPL=mock).
+engine = ["metaharmonizer"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+metaharmonizer-mcp = "metaharmonizer_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/metaharmonizer_mcp"]
