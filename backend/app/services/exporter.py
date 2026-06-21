@@ -95,7 +95,8 @@ async def export_harmonized_csv(
 ) -> str:
     """
     Produce a harmonized CSV: rename raw columns to their accepted/curated
-    mappings, drop unmapped columns, and return CSV text.
+    mappings, drop unmapped columns, rewrite accepted cell values to their
+    confirmed ontology terms (U5), and return CSV text.
     """
     mappings = await mappings_repo.get_mappings(db, study_id)
 
@@ -131,7 +132,33 @@ async def export_harmonized_csv(
             unique_keep.append(c)
 
     out_df = raw_df[unique_keep].rename(columns=rename_map)
+
+    # Value-level rewrite (U5): for each output column, replace accepted raw
+    # values with their confirmed ontology term so the table carries resolved
+    # cell values — not just renamed columns. Unmatched values pass through.
+    value_rewrites = await _build_value_rewrites(db, study_id)
+    for col, lookup in value_rewrites.items():
+        if col in out_df.columns:
+            out_df[col] = out_df[col].map(
+                lambda v, _m=lookup: _m.get(str(v), v) if pd.notna(v) else v
+            )
+
     return out_df.to_csv(index=False)
+
+
+async def _build_value_rewrites(
+    db: AsyncSession, study_id: str
+) -> dict[str, dict[str, str]]:
+    """Map each harmonized field to its accepted ``raw_value -> term`` rewrites."""
+    rewrites: dict[str, dict[str, str]] = {}
+    for o in await ontology_repo.get_ontology_mappings(db, study_id):
+        if o["status"] != "accepted":
+            continue
+        term = o.get("curator_term") or o.get("ontology_term")
+        if not term:
+            continue
+        rewrites.setdefault(o["field_name"], {})[str(o["raw_value"])] = str(term)
+    return rewrites
 
 
 # ---------------------------------------------------------------------------

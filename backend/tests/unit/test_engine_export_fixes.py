@@ -32,3 +32,12 @@ def test_cbioportal_export_blanks_missing_values():
     assert exporter._normalize_survival(float("nan")) == ""
     # A real value still passes through.
     assert exporter._sanitize_id("MG100208") == "MG100208"
+
+
+def test_value_rewrite_map_applies_accepted_terms():
+    """U5: a column's accepted raw_value -> term mapping rewrites cells; others pass through."""
+    lookup = {"adult": "Adult", "stool": "feces"}
+    col = pd.Series(["adult", "stool", "weird", None])
+    rewritten = col.map(lambda v, _m=lookup: _m.get(str(v), v) if pd.notna(v) else v)
+    assert list(rewritten) == ["Adult", "feces", "weird", None]
+

@@ -34,6 +34,17 @@ type SortKey = 'raw_column' | 'confidence_score' | 'stage' | 'status';
 type FilterStage = 'all' | 'stage1' | 'stage2' | 'stage3' | 'stage4' | 'invalid' | 'unmapped';
 type FilterStatus = 'all' | 'pending' | 'accepted' | 'rejected';
 
+// Stage display order + colours for the distribution bar (aligned with StageBadge).
+const STAGE_ORDER = ['stage1', 'stage2', 'stage3', 'stage4', 'invalid', 'unmapped'] as const;
+const STAGE_META: Record<string, { label: string; bar: string }> = {
+  stage1: { label: 'S1 Dict/Fuzzy', bar: 'bg-blue-500' },
+  stage2: { label: 'S2 Value/Ontology', bar: 'bg-indigo-500' },
+  stage3: { label: 'S3 Semantic', bar: 'bg-purple-500' },
+  stage4: { label: 'S4 LLM', bar: 'bg-orange-500' },
+  invalid: { label: 'Invalid', bar: 'bg-red-500' },
+  unmapped: { label: 'Unmapped', bar: 'bg-gray-400' },
+};
+
 export default function MappingReview() {
   const { studyId } = useParams<{ studyId: string }>();
   const { data: studies, isLoading: studiesLoading } = useStudies();
@@ -91,6 +102,16 @@ export default function MappingReview() {
     });
     return result;
   }, [mappings, filterStage, filterStatus, sortKey, sortAsc]);
+
+  // Per-stage counts for the distribution bar (full study, not the filtered view).
+  const stageCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of mappings) {
+      const key = m.stage ?? 'unmapped';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [mappings]);
 
   // Actions
   const updateMapping = useCallback(
@@ -250,6 +271,58 @@ export default function MappingReview() {
           );
         })}
       </div>
+
+      {/* Stage distribution — at-a-glance breakdown, click a segment to filter */}
+      {mappings.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-500">Stage breakdown</span>
+            {filterStage !== 'all' && (
+              <button
+                onClick={() => setFilterStage('all')}
+                className="text-xs font-medium text-primary-600 hover:text-primary-700"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex h-2.5 overflow-hidden rounded-full bg-gray-100">
+            {STAGE_ORDER.map((s) => {
+              const count = stageCounts[s] ?? 0;
+              if (!count) return null;
+              const pct = (count / mappings.length) * 100;
+              return (
+                <button
+                  key={s}
+                  title={`${STAGE_META[s].label}: ${count}`}
+                  onClick={() => setFilterStage(filterStage === s ? 'all' : (s as FilterStage))}
+                  className={`${STAGE_META[s].bar} transition-opacity hover:opacity-80 ${
+                    filterStage !== 'all' && filterStage !== s ? 'opacity-30' : ''
+                  }`}
+                  style={{ width: `${pct}%` }}
+                />
+              );
+            })}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {STAGE_ORDER.map((s) => {
+              const count = stageCounts[s] ?? 0;
+              if (!count) return null;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setFilterStage(filterStage === s ? 'all' : (s as FilterStage))}
+                  className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900"
+                >
+                  <span className={`h-2 w-2 rounded-full ${STAGE_META[s].bar}`} />
+                  {STAGE_META[s].label}
+                  <span className="font-semibold">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-4 bg-white border border-gray-200 rounded-xl p-3">
