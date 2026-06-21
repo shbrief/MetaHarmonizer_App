@@ -52,13 +52,13 @@ _SURVIVAL_PREFIX: dict[str, str] = {
 
 def _sanitize_id(value: Any) -> str:
     """Coerce a value into a cBioPortal-legal ID (letters, numbers, . _ -)."""
-    text = "" if value is None else str(value)
+    text = "" if pd.isna(value) else str(value)
     return _ID_INVALID.sub("_", text)
 
 
 def _normalize_survival(value: Any) -> str:
     """Prefix a survival-status value with 0:/1: if it isn't already."""
-    text = "" if value is None else str(value).strip()
+    text = "" if pd.isna(value) else str(value).strip()
     if not text or text[:2] in ("0:", "1:"):
         return text
     return _SURVIVAL_PREFIX.get(text.upper(), text)
@@ -296,7 +296,9 @@ async def export_cbioportal(
             elif target_id.endswith("_STATUS") and f"{target_id[:-7]}_MONTHS" in seen_targets:
                 out_row.append(_normalize_survival(raw_val))
             else:
-                out_row.append("" if raw_val is None else str(raw_val))
+                # pandas NaN is not None, so guard with isna to avoid writing
+                # the literal string "nan"; cBioPortal expects an empty cell.
+                out_row.append("" if pd.isna(raw_val) else str(raw_val))
         writer.writerow(out_row)
 
     return buf.getvalue()

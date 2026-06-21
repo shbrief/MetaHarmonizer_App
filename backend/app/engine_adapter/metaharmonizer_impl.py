@@ -211,7 +211,11 @@ class MetaHarmonizerAdapter:
 
     @staticmethod
     def _to_score(value: Any) -> float:
-        """Coerce a possibly-missing/NaN score to a finite float in [0, 1]."""
+        """Coerce a possibly-missing/NaN score to a finite float in [0, 1].
+
+        Stage-3 similarity can land slightly above 1.0, so clamp to keep
+        confidence a true [0, 1] fraction for thresholds and the UI.
+        """
         if MetaHarmonizerAdapter._is_missing(value):
             return 0.0
         try:
@@ -220,7 +224,7 @@ class MetaHarmonizerAdapter:
             return 0.0
         if math.isnan(f) or math.isinf(f):
             return 0.0
-        return f
+        return max(0.0, min(1.0, f))
 
     @staticmethod
     def _to_dashboard_row(raw: dict[str, Any]) -> dict[str, Any]:
