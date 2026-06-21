@@ -28,6 +28,45 @@ from app.repositories import studies as studies_repo
 # cBioPortal auto-populates these; they must not appear in a clinical data file.
 BANNED_ATTRS: set[str] = {"MUTATION_COUNT", "FRACTION_GENOME_ALTERED"}
 
+# Checklist: columns to strip before import (verbatim from the Study-checklist;
+# extensible). Matched against the normalized attribute id and raw column name.
+BANNED_SOURCE_COLUMNS: set[str] = {
+    "PART_A_CONSENT",
+    "PART_C_CONSENT",
+    "MSI_COMMENTS",
+    "IMPACT_CVR_TMB",
+    "IMPACT_TMB",
+    "COLLABORATION_ID",
+    "PATIENTCURRENTAGE",
+    "RELIGION",
+}
+
+# Smart (curly) quotes the checklist forbids in field values.
+_SMART_QUOTES = str.maketrans({
+    "\u201c": '"', "\u201d": '"',  # “ ”
+    "\u2018": "'", "\u2019": "'",  # ‘ ’
+})
+
+
+def _norm_attr(name: str) -> str:
+    """Normalize a column/attribute name for blocklist comparison."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(name).strip()).strip("_").upper()
+
+
+def _is_banned(target_id: str, raw_column: str) -> bool:
+    """True if the column is checklist-banned (by target id or raw name)."""
+    if target_id in BANNED_ATTRS:
+        return True
+    return (
+        _norm_attr(target_id) in BANNED_SOURCE_COLUMNS
+        or _norm_attr(raw_column) in BANNED_SOURCE_COLUMNS
+    )
+
+
+def _strip_smart_quotes(text: str) -> str:
+    """Replace curly quotes with straight ones (checklist: no smart quotes)."""
+    return text.translate(_SMART_QUOTES)
+
 # Patient-level clinical attributes (cBioPortal convention). When a study is
 # exported as a folder, these go to data_clinical_patient.txt and everything
 # else (that isn't an ID) goes to data_clinical_sample.txt. Survival columns
@@ -240,7 +279,7 @@ def _clinical_column_specs(
         if raw not in raw_df.columns:
             continue
         target_id = target.upper().replace(" ", "_")
-        if target_id in BANNED_ATTRS or target_id in {"PATIENT_ID", "SAMPLE_ID"}:
+        if _is_banned(target_id, raw) or target_id in {"PATIENT_ID", "SAMPLE_ID"}:
             continue
         if target_id in seen_targets:
             continue
@@ -339,7 +378,8 @@ def _write_clinical_tsv(
                 else:
                     lookup = rewrites.get(target_id)
                     text = str(raw_val)
-                    out_row.append(lookup.get(text, text) if lookup else text)
+                    text = lookup.get(text, text) if lookup else text
+                    out_row.append(_strip_smart_quotes(text))
         writer.writerow(out_row)
 
     return buf.getvalue()

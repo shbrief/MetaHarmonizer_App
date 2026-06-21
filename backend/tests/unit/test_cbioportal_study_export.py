@@ -105,6 +105,62 @@ def test_write_clinical_tsv_header_and_values():
     assert row2[3] == ""  # NaN -> empty, not "nan"
 
 
+def test_banned_checklist_columns_stripped():
+    raw_df = pd.DataFrame(
+        {
+            "subject": ["p1"],
+            "religion": ["x"],
+            "msi": ["y"],
+            "gender": ["male"],
+        }
+    )
+    mappings = [
+        {"raw_column": "subject", "matched_field": "PATIENT_ID", "status": "accepted"},
+        # Checklist-banned by target id.
+        {"raw_column": "religion", "matched_field": "Religion", "status": "accepted"},
+        {"raw_column": "msi", "matched_field": "MSI comments", "status": "accepted"},
+        {"raw_column": "gender", "matched_field": "SEX", "status": "accepted"},
+    ]
+    targets = [s["target"] for s in exporter._clinical_column_specs(mappings, raw_df)]
+    assert "RELIGION" not in targets
+    assert "MSI_COMMENTS" not in targets
+    assert "SEX" in targets
+
+
+def test_banned_by_raw_column_name():
+    # Banned even if the mapper picked a non-banned target, matched on raw name.
+    raw_df = pd.DataFrame({"Part-A consent": ["yes"], "gender": ["male"]})
+    mappings = [
+        {"raw_column": "Part-A consent", "matched_field": "CONSENT", "status": "accepted"},
+        {"raw_column": "gender", "matched_field": "SEX", "status": "accepted"},
+    ]
+    targets = [s["target"] for s in exporter._clinical_column_specs(mappings, raw_df)]
+    assert "CONSENT" not in targets
+    assert "SEX" in targets
+
+
+def test_smart_quotes_stripped_and_lf_endings():
+    cols = [
+        exporter._id_spec("PATIENT_ID", "subject", "Patient Identifier", "Unique patient identifier"),
+        exporter._id_spec("SAMPLE_ID", "samp", "Sample Identifier", "Unique sample identifier"),
+        {"raw": "note", "target": "NOTE", "display": "Note", "description": "Note", "dtype": "STRING", "priority": 1},
+    ]
+    raw_df = pd.DataFrame(
+        {
+            "subject": ["p1"],
+            "samp": ["s1"],
+            "note": ["he said \u201chello\u201d and \u2018bye\u2019"],
+        }
+    )
+    tsv = exporter._write_clinical_tsv(cols, raw_df)
+    # LF only — no CR.
+    assert "\r" not in tsv
+    data_row = tsv.rstrip("\n").split("\n")[5]
+    assert "\u201c" not in data_row and "\u201d" not in data_row
+    assert '"hello"' in data_row
+    assert "'bye'" in data_row
+
+
 # ---------------------------------------------------------------------------
 # Full study-folder export (patient/sample split)
 # ---------------------------------------------------------------------------
