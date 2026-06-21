@@ -197,3 +197,34 @@ export async function adminSetActive(userId: number, isActive: boolean): Promise
 export async function adminForceLogout(userId: number): Promise<void> {
     await apiFetch(`/admin/users/${userId}/logout`, { method: 'POST', json: false });
 }
+
+/* ---------- Schema versions (admin, U9) ---------- */
+
+export interface SchemaVersion {
+    id: number;
+    label: string;
+    is_current: boolean;
+    source_path: string | null;
+    created_at: string;
+}
+
+export async function adminListSchemaVersions(): Promise<SchemaVersion[]> {
+    return apiFetch<SchemaVersion[]>('/admin/schema-versions');
+}
+
+export async function adminUploadSchemaVersion(
+    label: string,
+    file: File,
+    promote = false,
+): Promise<{ id: number; label: string; is_current: boolean }> {
+    const form = new FormData();
+    form.append('file', file);
+    const params = new URLSearchParams({ label, promote: String(promote) });
+    return apiFetch(`/admin/schema-versions?${params}`, { method: 'POST', body: form });
+}
+
+export async function adminPromoteSchemaVersion(
+    versionId: number,
+): Promise<{ id: number; label: string; is_current: boolean }> {
+    return apiFetch(`/admin/schema-versions/${versionId}/promote`, { method: 'POST' });
+}

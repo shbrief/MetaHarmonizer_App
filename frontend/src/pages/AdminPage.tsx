@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, Users, LogOut, Ban, CheckCircle2, ShieldCheck, X, MailWarning } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Shield, Users, LogOut, Ban, CheckCircle2, ShieldCheck, X, MailWarning, Layers, Upload, CheckCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import PageHeader from '../components/ui/PageHeader';
-import { Card } from '../components/ui/Card';
+import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import { LoadingBlock, EmptyState } from '../components/ui/Feedback';
@@ -11,9 +12,12 @@ import {
   adminApproveAdmin,
   adminForceLogout,
   adminListUsers,
+  adminListSchemaVersions,
+  adminPromoteSchemaVersion,
   adminRejectAdmin,
   adminSetActive,
   adminSetRole,
+  adminUploadSchemaVersion,
 } from '../api/auth';
 import type { Role, User } from '../api/types';
 
@@ -235,6 +239,8 @@ export default function AdminPage() {
           </div>
         )}
       </Card>
+
+      <SchemaVersionsCard />
     </div>
   );
 }
@@ -255,4 +261,125 @@ function computeStats(users: User[]) {
     curator: users.filter((u) => u.role === 'curator').length,
     disabled: users.filter((u) => !u.is_active).length,
   };
+}
+
+function SchemaVersionsCard() {
+  const qc = useQueryClient();
+  const versions = useQuery({ queryKey: ['admin', 'schema-versions'], queryFn: adminListSchemaVersions });
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [label, setLabel] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'schema-versions'] });
+
+  const uploadM = useMutation({
+    mutationFn: () => adminUploadSchemaVersion(label.trim(), file!, true),
+    onSuccess: (v) => {
+      invalidate();
+      toast.success(`Schema ${v.label} uploaded and promoted`);
+      setLabel('');
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Could not upload schema version'),
+  });
+
+  const promoteM = useMutation({
+    mutationFn: adminPromoteSchemaVersion,
+    onSuccess: (v) => {
+      invalidate();
+      toast.success(`Schema ${v.label} is now current`);
+    },
+    onError: (e: any) => toast.error(e?.message ?? 'Could not promote version'),
+  });
+
+  return (
+    <Card>
+      <CardHeader
+        icon={<Layers className="h-4 w-4" />}
+        title="Schema versions"
+        description="The curated-fields schema new studies map against. New uploads are new versions — existing studies stay pinned."
+      />
+      <CardBody className="space-y-4">
+        {/* Upload form */}
+        <form
+          className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (label.trim() && file) uploadM.mutate();
+          }}
+        >
+          <div>
+            <label htmlFor="schema-label" className="block text-xs font-medium text-slate-500">
+              Version label
+            </label>
+            <input
+              id="schema-label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. v2"
+              className="mt-1 w-28 rounded border border-slate-200 px-2 py-1.5 text-sm focus:border-primary-400 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label htmlFor="schema-file" className="block text-xs font-medium text-slate-500">
+              Curated-fields CSV
+            </label>
+            <input
+              id="schema-file"
+              ref={fileRef}
+              type="file"
+              accept=".csv"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="mt-1 text-sm file:mr-2 file:rounded file:border-0 file:bg-primary-50 file:px-2 file:py-1 file:text-primary-700"
+            />
+          </div>
+          <Button
+            type="submit"
+            loading={uploadM.isPending}
+            disabled={!label.trim() || !file}
+            icon={<Upload className="h-4 w-4" />}
+          >
+            Upload &amp; promote
+          </Button>
+        </form>
+
+        {/* Versions list */}
+        {versions.isLoading ? (
+          <LoadingBlock label="Loading schema versions…" />
+        ) : !versions.data?.length ? (
+          <EmptyState title="No schema versions yet" />
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {versions.data.map((v) => (
+              <li key={v.id} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm font-medium text-slate-800">{v.label}</span>
+                  {v.is_current ? (
+                    <Badge tone="green">
+                      <CheckCheck className="h-3.5 w-3.5" />
+                      Current
+                    </Badge>
+                  ) : null}
+                  <span className="text-xs text-slate-400">
+                    {new Date(v.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                {!v.is_current && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={promoteM.isPending && promoteM.variables === v.id}
+                    onClick={() => promoteM.mutate(v.id)}
+                  >
+                    Make current
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+    </Card>
+  );
 }
