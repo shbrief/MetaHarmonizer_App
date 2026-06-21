@@ -302,3 +302,81 @@ class IdempotencyKey(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# ---------------------------------------------------------------------------
+# Federation-lite (G1) — signed cross-instance mapping exchange
+# ---------------------------------------------------------------------------
+class FederationImport(Base):
+    """One received export bundle, pending local approval (Q10 two-stage)."""
+
+    __tablename__ = "federation_imports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_instance: Mapped[str] = mapped_column(String(120), nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    signature: Mapped[str | None] = mapped_column(Text)
+    signature_valid: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
+    mapping_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    imported_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    reviewed_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    mappings: Mapped[list["FederationMapping"]] = relationship(
+        back_populates="parent", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','approved','rejected')", name="fed_import_status_valid"
+        ),
+    )
+
+
+class FederationMapping(Base):
+    """A single curator-confirmed mapping carried in an imported bundle.
+
+    ``dedup_key`` is unique per source instance so the same mapping arriving in
+    two bundles from one peer is not double-counted.
+    """
+
+    __tablename__ = "federation_mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_id: Mapped[int] = mapped_column(
+        ForeignKey("federation_imports.id", ondelete="CASCADE"), nullable=False
+    )
+    source_instance: Mapped[str] = mapped_column(String(120), nullable=False)
+    record_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    raw_key: Mapped[str] = mapped_column(Text, nullable=False)
+    accepted_target: Mapped[str] = mapped_column(Text, nullable=False)
+    ontology_id: Mapped[str | None] = mapped_column(String(100))
+    confidence_score: Mapped[float | None] = mapped_column(Float)
+    dedup_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    parent: Mapped["FederationImport"] = relationship(back_populates="mappings")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_instance", "dedup_key", name="federation_mapping_source_dedup"
+        ),
+        Index("ix_federation_mappings_import_id", "import_id"),
+        CheckConstraint(
+            "record_type in ('schema_mapping','ontology_mapping')",
+            name="fed_mapping_type_valid",
+        ),
+    )
+

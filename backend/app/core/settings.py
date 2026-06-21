@@ -106,6 +106,16 @@ class Settings(BaseSettings):
     log_level: Literal["debug", "info", "warning", "error"] = "info"
     sentry_dsn: str | None = None
 
+    # ── Federation-lite (G1) ────────────────────────────────────────────────
+    # This instance's identity + Ed25519 signing key (32-byte private seed,
+    # hex-encoded). When unset, a dev key is derived from the instance id so
+    # local round-trips work; production sets a real key and documents rotation.
+    federation_instance_id: str = "local-instance"
+    federation_private_key: str | None = None  # hex Ed25519 seed (64 hex chars)
+    # Trusted peers: comma-separated ``instance_id:hex_public_key`` pairs whose
+    # signed exports this instance will accept on import.
+    federation_trusted_keys: str = ""
+
     # ── Validators (fail-fast) ──────────────────────────────────────────────
     @field_validator("jwt_secret")
     @classmethod
