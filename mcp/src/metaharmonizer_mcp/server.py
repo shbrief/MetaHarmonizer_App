@@ -16,11 +16,16 @@ dependency-free demo; ``metaharmonizer`` for the real engine).
 from __future__ import annotations
 
 import argparse
+import logging
+import os
+import sys
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from . import engine
+
+logger = logging.getLogger("metaharmonizer_mcp")
 
 mcp = FastMCP("metaharmonizer")
 
@@ -77,7 +82,30 @@ def main(argv: list[str] | None = None) -> None:
         default="stdio",
         help="MCP transport (default: stdio).",
     )
+    parser.add_argument(
+        "--no-prewarm",
+        action="store_true",
+        help="Skip loading engine models at startup (first tool call pays the "
+        "cold start instead).",
+    )
     args = parser.parse_args(argv)
+
+    # Pay the engine cold start (model load + KB) at server startup, not on the
+    # user's first tool call. Desktop clients (Claude, Cursor) launch this as a
+    # subprocess, so without pre-warm the first harmonize would block for the
+    # full model-load. Best-effort: a warm-up failure must not stop the server.
+    # ``METAHARMONIZER_PREWARM=0`` (or --no-prewarm) disables it.
+    prewarm = not args.no_prewarm and os.getenv("METAHARMONIZER_PREWARM", "1") != "0"
+    if prewarm:
+        logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+        try:
+            logger.info("metaharmonizer-mcp: pre-warming engine (%s)...",
+                        os.getenv("ENGINE_IMPL", "metaharmonizer"))
+            engine.get_engine().pre_warm()
+            logger.info("metaharmonizer-mcp: engine ready.")
+        except Exception as exc:  # noqa: BLE001 — warm-up must never block startup
+            logger.warning("metaharmonizer-mcp: pre-warm skipped (%s)", exc)
+
     mcp.run(transport=args.transport)
 
 

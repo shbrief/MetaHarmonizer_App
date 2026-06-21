@@ -96,9 +96,15 @@ def harmonize_columns(columns: list[str]) -> list[dict[str, Any]]:
 
 
 def harmonize_values(field_name: str, values: list[str]) -> list[dict[str, Any]]:
-    """Map a list of raw cell values (for one field) to ontology terms."""
-    raw_df = pd.DataFrame({field_name: values})
-    schema_mappings = [{"raw_column": field_name, "matched_field": field_name}]
+    """Map a list of raw cell values (for one field) to ontology terms.
+
+    The engine's value dictionary keys fields in lowercase (the schema-mapping
+    output is lowercase, e.g. ``sex``), so the field name is normalized before
+    lookup. The returned ``field_name`` echoes the engine's canonical form.
+    """
+    field = field_name.strip().lower()
+    raw_df = pd.DataFrame({field: values})
+    schema_mappings = [{"raw_column": field, "matched_field": field}]
     return get_engine().map_values(raw_df, schema_mappings)
 
 

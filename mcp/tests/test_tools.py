@@ -44,12 +44,22 @@ def test_harmonize_values():
     rows = engine.harmonize_values("SEX", ["male", "female", "male"])
     assert rows  # at least one resolved value
     for r in rows:
-        assert r["field_name"] == "SEX"
+        # Field is normalized to the engine's lowercase canonical form.
+        assert r["field_name"] == "sex"
         assert "ontology_term" in r
         assert "ontology_id" in r
     # Distinct values only (mock dedupes via unique()).
     raw_values = {r["raw_value"] for r in rows}
     assert raw_values == {"male", "female"}
+
+
+def test_harmonize_values_normalizes_field_case():
+    # The engine's value dictionary keys fields lowercase; an upper-case field
+    # from the caller must still resolve (regression: real engine returned 0
+    # rows for "SEX" before the bridge lowercased the field name).
+    upper = engine.harmonize_values("SEX", ["male", "female"])
+    lower = engine.harmonize_values("sex", ["male", "female"])
+    assert len(upper) == len(lower) > 0
 
 
 def test_harmonize_table():

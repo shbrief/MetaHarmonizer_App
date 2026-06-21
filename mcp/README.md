@@ -41,6 +41,10 @@ Environment:
   the bundled `metadata_samples/curated_meta.csv`).
 - `METAHARMONIZER_BACKEND_DIR` — path to the dashboard `backend/` (only if not
   auto-discovered).
+- `METAHARMONIZER_PREWARM` — `1` (default) loads the engine models **at server
+  startup** so the user's first tool call is already warm; set `0` (or pass
+  `--no-prewarm`) to defer the cold start to the first call. With the real
+  engine, pre-warm takes ~10–15 s once; warm tool calls then run in seconds.
 
 ## Wire it into a client
 
