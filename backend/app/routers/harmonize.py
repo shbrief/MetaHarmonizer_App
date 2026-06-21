@@ -96,6 +96,10 @@ async def harmonize_study(
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}")
 
     study_name = Path(file.filename).stem
+    # Stamp the study with the current schema version for reproducibility.
+    from app.repositories import schema_versions as schema_repo
+
+    current_schema = await schema_repo.get_current(db_session)
     await studies_repo.create_study(
         db_session,
         study_id=study_id,
@@ -104,6 +108,7 @@ async def harmonize_study(
         row_count=len(shape_df),
         column_count=len(shape_df.columns),
         owner_id=getattr(user, "id", None),
+        schema_version_id=current_schema.id if current_schema else None,
     )
     await studies_repo.update_status(db_session, study_id, "queued")
 

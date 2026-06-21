@@ -47,6 +47,7 @@ async def create_study(
     row_count: int,
     column_count: int,
     owner_id: int | None = None,
+    schema_version_id: int | None = None,
 ) -> dict:
     study = Study(
         id=study_id,
@@ -56,6 +57,7 @@ async def create_study(
         row_count=row_count,
         column_count=column_count,
         owner_id=owner_id,
+        schema_version_id=schema_version_id,
     )
     db.add(study)
     await db.flush()

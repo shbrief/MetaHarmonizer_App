@@ -39,6 +39,20 @@ async def lifespan(app: FastAPI):
     t = threading.Thread(target=_warm, daemon=True)
     t.start()
 
+    # Seed the bootstrap schema version (v1) so every study can be stamped with
+    # a reproducibility pin. Idempotent: no-op once a current version exists.
+    try:
+        from app.db.session import SessionLocal
+        from app.repositories import schema_versions as schema_repo
+        from app.routers.harmonize import CURATED_PATH
+
+        async with SessionLocal() as db:
+            await schema_repo.ensure_seed_version(db, source_path=str(CURATED_PATH))
+    except Exception:  # noqa: BLE001 — seeding must never block startup
+        import logging
+
+        logging.getLogger("app").warning("schema version seed skipped", exc_info=True)
+
     yield
 
 

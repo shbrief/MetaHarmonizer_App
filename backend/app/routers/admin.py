@@ -9,7 +9,10 @@ routes remain reachable for local development.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import ForbiddenError, actor_label, require_role
@@ -17,11 +20,15 @@ from app.core.errors import NotFoundError
 from app.db.models import User
 from app.db.session import get_db
 from app.repositories import audit as audit_repo
+from app.repositories import schema_versions as schema_repo
 from app.repositories import sessions as sessions_repo
 from app.repositories import users as users_repo
 from app.schemas.auth import ActiveUpdate, RoleUpdate, UserOut
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+# New schema CSVs are stored alongside the seed curated file.
+SCHEMA_STORE = Path(__file__).resolve().parent.parent.parent / "data" / "schema" / "versions"
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -162,3 +169,74 @@ async def force_logout(
         curator=actor_label(admin),
     )
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Schema versioning (U9)
+# ---------------------------------------------------------------------------
+@router.get("/schema-versions")
+async def list_schema_versions(
+    _admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    return await schema_repo.list_versions(db)
+
+
+@router.post("/schema-versions", status_code=201)
+async def upload_schema_version(
+    label: str,
+    file: UploadFile = File(...),
+    promote: bool = False,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Upload a new curated-fields CSV as a new schema version (never an
+    overwrite). Optionally promote it to current in the same call."""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="A .csv file is required.")
+    if await schema_repo.get_by_label(db, label):
+        raise HTTPException(status_code=409, detail=f"Version '{label}' already exists.")
+
+    SCHEMA_STORE.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    save_path = SCHEMA_STORE / f"curated_{label}_{stamp}.csv"
+    with open(save_path, "wb") as f:
+        while chunk := await file.read(1024 * 1024):
+            f.write(chunk)
+
+    version = await schema_repo.create_version(
+        db, label=label, source_path=str(save_path), make_current=promote
+    )
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=None,
+        action="schema_version_upload",
+        new_value=f"{label}{' (promoted)' if promote else ''}",
+        actor_id=admin.id,
+        curator=actor_label(admin),
+    )
+    await db.commit()
+    return {"id": version.id, "label": version.label, "is_current": version.is_current}
+
+
+@router.post("/schema-versions/{version_id}/promote")
+async def promote_schema_version(
+    version_id: int,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Make a schema version current. New studies use it; existing studies stay
+    pinned to whatever they were harmonized against."""
+    version = await schema_repo.promote(db, version_id)
+    if not version:
+        raise NotFoundError("Schema version not found.")
+    await audit_repo.add_audit_entry(
+        db,
+        study_id=None,
+        action="schema_version_promote",
+        new_value=version.label,
+        actor_id=admin.id,
+        curator=actor_label(admin),
+    )
+    await db.commit()
+    return {"id": version.id, "label": version.label, "is_current": True}
