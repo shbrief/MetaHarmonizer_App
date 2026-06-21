@@ -114,14 +114,38 @@ class MetaHarmonizerAdapter:
         raw_df: pd.DataFrame,
         schema_mappings: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        # Value-to-ontology mapping is dashboard-owned (curated dictionaries
-        # + NCI EVS cache) and lives in ``app.services.harmonizer``. The
-        # upstream package ships an ``OntoMapEngine`` (FAISS + SQLite) we may
-        # route through later; until that's evaluated we keep the existing
-        # deterministic behaviour so the API contract is unchanged.
+        # Value-to-ontology mapping (F-11). For the categories the engine ships
+        # first-class (NCIt-disease, UBERON-bodysite, NCIt-treatment) and only
+        # when the operator opts in (``ONTOLOGY_ENGINE=1``), route through the
+        # upstream ``OntoMapEngine`` (FAISS over the ontology corpus). Every
+        # other field — and any engine failure / missing corpus — falls back to
+        # the dashboard's curated dictionary so behaviour is unchanged by
+        # default and never breaks. EFO / HANCESTRO are intentionally NOT here:
+        # they need engine-team support (registry root / new category).
         from app.services.harmonizer import run_ontology_mapping
 
-        return run_ontology_mapping(raw_df, schema_mappings)
+        from . import _ontology
+
+        if not _ontology.engine_enabled():
+            return run_ontology_mapping(raw_df, schema_mappings)
+
+        try:
+            pkg = _require_pkg()
+            engine_rows, handled = _ontology.map_values_via_engine(
+                pkg, raw_df, schema_mappings
+            )
+        except Exception:  # noqa: BLE001 — never let the engine path break mapping
+            return run_ontology_mapping(raw_df, schema_mappings)
+
+        # Dictionary fallback for the fields the engine didn't cover.
+        remaining = [
+            m
+            for m in schema_mappings
+            if (m.get("curator_field") or m.get("matched_field") or "").strip().lower()
+            not in handled
+        ]
+        fallback_rows = run_ontology_mapping(raw_df, remaining) if remaining else []
+        return engine_rows + fallback_rows
 
     def llm_match(self, csv_path: str, raw_column: str) -> list[dict[str, Any]]:
         if not os.getenv("GEMINI_API_KEY"):
