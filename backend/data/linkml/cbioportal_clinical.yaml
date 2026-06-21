@@ -1,0 +1,69 @@
+id: https://cbioportal.org/linkml/clinical
+name: cbioportal_clinical
+title: cBioPortal clinical attribute vocabularies
+description: >-
+  LinkML transcription of the cBioPortal public-study curation checklist
+  controlled vocabularies and the survival-status prefixing rule. Every
+  permissible value is taken verbatim from the Study-checklist and
+  archive/survival-data-migration/survivalStatusVocabularies.txt in
+  cBioPortal/datahub-study-curation-tools. No rules are invented here; this
+  file is the single source of truth the export gate enforces.
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+default_range: string
+
+enums:
+  SexEnum:
+    description: "Checklist: Sex must be Female/Male with capitalization. No F/M."
+    permissible_values:
+      Female: {}
+      Male: {}
+  SampleClassEnum:
+    description: "Checklist: SAMPLE_CLASS allowed values."
+    permissible_values:
+      Tumor: {}
+      CellLine: {}
+      Xenograft: {}
+      Organoid: {}
+  SampleTypeEnum:
+    description: "Checklist: SAMPLE_TYPE allowed values."
+    permissible_values:
+      Primary: {}
+      Metastasis: {}
+      Recurrence: {}
+  SomaticStatusEnum:
+    description: "Checklist: SOMATIC_STATUS indicates matched-normal status."
+    permissible_values:
+      Matched: {}
+      Unmatched: {}
+
+slots:
+  SEX:
+    range: SexEnum
+  SAMPLE_CLASS:
+    range: SampleClassEnum
+  SAMPLE_TYPE:
+    range: SampleTypeEnum
+  SOMATIC_STATUS:
+    range: SomaticStatusEnum
+
+classes:
+  ClinicalRecord:
+    description: A harmonized clinical row (patient- or sample-level).
+    slots:
+      - SEX
+      - SAMPLE_CLASS
+      - SAMPLE_TYPE
+      - SOMATIC_STATUS
+
+# Survival *_STATUS columns use a free PREFIX (OS_STATUS, DFS_STATUS, RFS_STATUS,
+# ...), so they are a pattern rule, not a fixed enum: each value must be
+# prefixed 0: (no event) or 1: (event) per survivalStatusVocabularies.txt
+# (deceased -> 1, living/alive -> 0, etc.). SOMATIC_STATUS is excluded — it is a
+# fixed enum above, not a survival column.
+settings:
+  survival_status_suffix: _STATUS
+  survival_status_pattern: "^[01]:"
+  survival_status_exclude:
+    - SOMATIC_STATUS

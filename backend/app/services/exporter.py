@@ -287,8 +287,18 @@ def _id_raw_source(
     return _find_id_column(raw_df, fallback_candidates)
 
 
-def _write_clinical_tsv(cols: list[dict[str, Any]], raw_df: pd.DataFrame) -> str:
-    """Write a cBioPortal 5-row-header clinical TSV for the given column specs."""
+def _write_clinical_tsv(
+    cols: list[dict[str, Any]],
+    raw_df: pd.DataFrame,
+    value_rewrites: dict[str, dict[str, str]] | None = None,
+) -> str:
+    """Write a cBioPortal 5-row-header clinical TSV for the given column specs.
+
+    ``value_rewrites`` maps a target attribute id (e.g. ``SEX``) to a
+    ``raw_value -> confirmed term`` lookup so the exported cells carry the
+    curator-resolved values (U5), not the raw ones.
+    """
+    rewrites = value_rewrites or {}
     targets = {c["target"] for c in cols}
     survival_status_with_months = {
         c["target"]
@@ -321,12 +331,28 @@ def _write_clinical_tsv(cols: list[dict[str, Any]], raw_df: pd.DataFrame) -> str
             elif target_id in survival_status_with_months:
                 out_row.append(_normalize_survival(raw_val))
             else:
-                # pandas NaN is not None; guard with isna so a missing value is
-                # an empty cell, not the literal string "nan".
-                out_row.append("" if pd.isna(raw_val) else str(raw_val))
+                # Apply the curator-confirmed value rewrite (U5) so the cell
+                # carries the resolved term; fall back to the raw value. pandas
+                # NaN is not None, so guard with isna to avoid the literal "nan".
+                if pd.isna(raw_val):
+                    out_row.append("")
+                else:
+                    lookup = rewrites.get(target_id)
+                    text = str(raw_val)
+                    out_row.append(lookup.get(text, text) if lookup else text)
         writer.writerow(out_row)
 
     return buf.getvalue()
+
+
+def _rewrites_by_target(
+    field_rewrites: dict[str, dict[str, str]],
+) -> dict[str, dict[str, str]]:
+    """Re-key field-name rewrites to cBioPortal target ids (UPPER_CASE)."""
+    return {
+        field.upper().replace(" ", "_"): lookup
+        for field, lookup in field_rewrites.items()
+    }
 
 
 async def export_cbioportal(
@@ -339,6 +365,7 @@ async def export_cbioportal(
 
     Header rows: display names, descriptions, data types, priority, then the
     UPPER_CASE attribute IDs. PATIENT_ID and SAMPLE_ID are always present.
+    Curator-confirmed value rewrites (U5) are applied to the cells.
     """
     mappings = await mappings_repo.get_mappings(db, study_id)
     specs = _clinical_column_specs(mappings, raw_df)
@@ -360,7 +387,8 @@ async def export_cbioportal(
         _id_spec("SAMPLE_ID", sample_src, "Sample Identifier", "Unique sample identifier"),
         *specs,
     ]
-    return _write_clinical_tsv(cols, raw_df)
+    rewrites = _rewrites_by_target(await _build_value_rewrites(db, study_id))
+    return _write_clinical_tsv(cols, raw_df, rewrites)
 
 
 # ---------------------------------------------------------------------------
@@ -368,12 +396,13 @@ async def export_cbioportal(
 # ---------------------------------------------------------------------------
 
 def _meta_study(cancer_study_identifier: str, name: str, description: str) -> str:
+    # No ``add_global_case_list`` — the checklist says not to use it; we ship an
+    # explicit case_lists/cases_all.txt instead (and the two would collide).
     return (
         f"type_of_cancer: mixed\n"
         f"cancer_study_identifier: {cancer_study_identifier}\n"
         f"name: {name}\n"
         f"description: {description}\n"
-        f"add_global_case_list: true\n"
     )
 
 
@@ -384,6 +413,54 @@ def _meta_clinical(cancer_study_identifier: str, datatype: str, data_filename: s
         f"datatype: {datatype}\n"
         f"data_filename: {data_filename}\n"
     )
+
+
+def _case_list_all(cancer_study_identifier: str, sample_ids: list[str]) -> str:
+    """The ``cases_all.txt`` case list (every sample in the study).
+
+    cBioPortal expects a tab-separated list of sample IDs under
+    ``case_lists/cases_all.txt`` with the ``<study>_all`` stable id.
+    """
+    ids = "\t".join(sample_ids)
+    return (
+        f"cancer_study_identifier: {cancer_study_identifier}\n"
+        f"stable_id: {cancer_study_identifier}_all\n"
+        f"case_list_category: all_cases_in_study\n"
+        f"case_list_name: All samples\n"
+        f"case_list_description: All samples ({len(sample_ids)} samples)\n"
+        f"case_list_ids: {ids}\n"
+    )
+
+
+# Permissive OSS license shipped in the study folder (checklist: "make sure the
+# LICENSE is added to the study folder"). The harmonized clinical data is the
+# curators' to license; we ship a CC0 public-domain dedication as a safe default
+# for public datahub studies. Curators can replace it.
+_LICENSE_TEXT = (
+    "CC0 1.0 Universal (CC0 1.0) Public Domain Dedication\n"
+    "\n"
+    "This clinical study folder was harmonized with MetaHarmonizer. The data\n"
+    "curators are the source of, and hold any rights to, the underlying data.\n"
+    "To the extent possible under law, the curators have waived all copyright\n"
+    "and related or neighboring rights to this dataset. Replace this file with\n"
+    "the license that applies to your data before distribution.\n"
+    "\n"
+    "See https://creativecommons.org/publicdomain/zero/1.0/ for the full text.\n"
+)
+
+
+def _sample_ids_for_case_list(raw_df: pd.DataFrame, sample_src: str) -> list[str]:
+    """Sanitized, de-duplicated sample IDs in first-seen order."""
+    if sample_src not in raw_df.columns:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in raw_df[sample_src]:
+        sid = _sanitize_id(v)
+        if sid and sid not in seen:
+            seen.add(sid)
+            out.append(sid)
+    return out
 
 
 async def export_cbioportal_study(
@@ -400,6 +477,8 @@ async def export_cbioportal_study(
         data_clinical_patient.txt
         meta_clinical_sample.txt
         data_clinical_sample.txt
+        case_lists/cases_all.txt
+        LICENSE
 
     The clinical attributes are split per the curation checklist ("the clinical
     file should be split to patient and sample level attribute files"):
@@ -444,8 +523,10 @@ async def export_cbioportal_study(
 
     patient_df = raw_df.drop_duplicates(subset=[patient_src]) if patient_src in raw_df.columns else raw_df
 
-    data_clinical_patient = _write_clinical_tsv(patient_cols, patient_df)
-    data_clinical_sample = _write_clinical_tsv(sample_cols, raw_df)
+    rewrites = _rewrites_by_target(await _build_value_rewrites(db, study_id))
+    data_clinical_patient = _write_clinical_tsv(patient_cols, patient_df, rewrites)
+    data_clinical_sample = _write_clinical_tsv(sample_cols, raw_df, rewrites)
+    sample_ids = _sample_ids_for_case_list(raw_df, sample_src)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -460,7 +541,170 @@ async def export_cbioportal_study(
             _meta_clinical(identifier, "SAMPLE_ATTRIBUTES", "data_clinical_sample.txt"),
         )
         zf.writestr("data_clinical_sample.txt", data_clinical_sample)
+        if sample_ids:
+            zf.writestr("case_lists/cases_all.txt", _case_list_all(identifier, sample_ids))
+        zf.writestr("LICENSE", _LICENSE_TEXT)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Labeled dataset export (G9 — curator-confirmed mappings for retraining)
+# ---------------------------------------------------------------------------
+
+LABELED_FIELDNAMES = [
+    "record_type",
+    "raw_column",
+    "raw_sample_values",
+    "accepted_target",
+    "ontology_id",
+    "confidence",
+    "stage",
+    "method",
+    "schema_version",
+    "ontology_version",
+]
+
+
+def _distinct_sample_values(raw_df: pd.DataFrame, column: str, limit: int = 5) -> str:
+    """Up to ``limit`` distinct non-null values from a raw column, ';'-joined."""
+    if column not in raw_df.columns:
+        return ""
+    seen: list[str] = []
+    for v in raw_df[column]:
+        if pd.isna(v):
+            continue
+        s = str(v).strip()
+        if s and s not in seen:
+            seen.append(s)
+        if len(seen) >= limit:
+            break
+    return ";".join(seen)
+
+
+async def _labeled_rows(
+    db: AsyncSession, study_id: str, raw_df: pd.DataFrame
+) -> list[dict[str, Any]]:
+    """Curator-confirmed mappings as labeled training rows (G9).
+
+    Two record types in one dataset:
+    - ``schema_mapping``: an accepted raw column -> target field, with a few
+      distinct sample values as the input signal.
+    - ``ontology_mapping``: an accepted value -> ontology term/id.
+
+    Only **accepted** (human-confirmed) decisions are emitted — this is a
+    labeled dataset, not the raw engine output.
+    """
+    study = await studies_repo.get_study(db, study_id) or {}
+    schema_version = study.get("schema_version_id")
+    schema_version = "" if schema_version is None else str(schema_version)
+
+    rows: list[dict[str, Any]] = []
+
+    for m in await mappings_repo.get_mappings(db, study_id):
+        if m["status"] != "accepted":
+            continue
+        target = m.get("curator_field") or m.get("matched_field")
+        if not target:
+            continue
+        rows.append(
+            {
+                "record_type": "schema_mapping",
+                "raw_column": m["raw_column"],
+                "raw_sample_values": _distinct_sample_values(raw_df, m["raw_column"]),
+                "accepted_target": target,
+                "ontology_id": "",
+                "confidence": m.get("confidence_score") or "",
+                "stage": m.get("stage") or "",
+                "method": m.get("method") or "",
+                "schema_version": schema_version,
+                "ontology_version": "",
+            }
+        )
+
+    for o in await ontology_repo.get_ontology_mappings(db, study_id):
+        if o["status"] != "accepted":
+            continue
+        term = o.get("curator_term") or o.get("ontology_term")
+        if not term:
+            continue
+        rows.append(
+            {
+                "record_type": "ontology_mapping",
+                "raw_column": o["field_name"],
+                "raw_sample_values": str(o["raw_value"]),
+                "accepted_target": term,
+                "ontology_id": o.get("ontology_id") or "",
+                "confidence": o.get("confidence_score") or "",
+                "stage": "",
+                "method": "",
+                "schema_version": schema_version,
+                "ontology_version": "",
+            }
+        )
+
+    return rows
+
+
+async def export_labeled_dataset(
+    db: AsyncSession, study_id: str, raw_df: pd.DataFrame, fmt: str = "csv"
+) -> str:
+    """Curator-confirmed mappings as a labeled dataset (G9), CSV or JSONL.
+
+    Row shape: (record_type, raw_column, raw_sample_values, accepted_target,
+    ontology_id, confidence, stage, method, schema_version, ontology_version).
+    """
+    rows = await _labeled_rows(db, study_id, raw_df)
+
+    if fmt == "jsonl":
+        return "\n".join(json.dumps(r, default=str) for r in rows) + ("\n" if rows else "")
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=LABELED_FIELDNAMES, lineterminator="\n")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(r)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# LinkML export gate (G9 — controlled-vocabulary check before export)
+# ---------------------------------------------------------------------------
+
+
+def _parse_clinical_columns(tsv_text: str) -> dict[str, list[str]]:
+    """Parse a cBioPortal clinical TSV back into ``{attr_id: [values]}``.
+
+    The 5th line (index 4) is the UPPER_CASE attribute id row; data follows.
+    """
+    lines = tsv_text.split("\n")
+    if len(lines) <= 5:
+        return {}
+    header = lines[4].split("\t")
+    columns: dict[str, list[str]] = {h: [] for h in header}
+    for line in lines[5:]:
+        if not line:
+            continue
+        cells = line.split("\t")
+        for i, h in enumerate(header):
+            columns[h].append(cells[i] if i < len(cells) else "")
+    return columns
+
+
+async def linkml_check(
+    db: AsyncSession, study_id: str, raw_df: pd.DataFrame
+) -> dict[str, Any]:
+    """Run the LinkML controlled-vocabulary gate on the harmonized output.
+
+    Validates the exact cBioPortal sample-file values (after curator value
+    rewrites + survival prefixing) against the checklist vocabularies. Returns
+    ``{"ok": bool, "violations": [...]}``.
+    """
+    from app.services import linkml_gate
+
+    tsv = await export_cbioportal(db, study_id, raw_df)
+    columns = _parse_clinical_columns(tsv)
+    violations = linkml_gate.validate_clinical_columns(columns)
+    return {"ok": not violations, "violations": violations}
 
 
 # ---------------------------------------------------------------------------

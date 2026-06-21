@@ -35,6 +35,7 @@ def _to_dict(s: Study) -> dict:
         "column_count": s.column_count,
         "owner_id": s.owner_id,
         "exported": s.exported,
+        "schema_version_id": s.schema_version_id,
     }
 
 

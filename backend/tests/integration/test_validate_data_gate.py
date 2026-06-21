@@ -40,8 +40,12 @@ def _patch_repos(monkeypatch, mappings, study):
     async def _get_study(db, study_id):
         return study
 
+    async def _get_ontology(db, study_id):
+        return []
+
     monkeypatch.setattr(exporter.mappings_repo, "get_mappings", _get_mappings)
     monkeypatch.setattr(exporter.studies_repo, "get_study", _get_study)
+    monkeypatch.setattr(exporter.ontology_repo, "get_ontology_mappings", _get_ontology)
 
 
 def _sample_study_zip(monkeypatch) -> bytes:

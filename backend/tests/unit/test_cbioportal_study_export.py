@@ -110,15 +110,19 @@ def test_write_clinical_tsv_header_and_values():
 # ---------------------------------------------------------------------------
 
 
-def _patch_repos(monkeypatch, mappings, study):
+def _patch_repos(monkeypatch, mappings, study, ontology=None):
     async def _get_mappings(db, study_id):
         return mappings
 
     async def _get_study(db, study_id):
         return study
 
+    async def _get_ontology(db, study_id):
+        return ontology or []
+
     monkeypatch.setattr(exporter.mappings_repo, "get_mappings", _get_mappings)
     monkeypatch.setattr(exporter.studies_repo, "get_study", _get_study)
+    monkeypatch.setattr(exporter.ontology_repo, "get_ontology_mappings", _get_ontology)
 
 
 def test_study_folder_splits_patient_and_sample(monkeypatch):
@@ -142,13 +146,13 @@ def test_study_folder_splits_patient_and_sample(monkeypatch):
     zip_bytes = asyncio.run(exporter.export_cbioportal_study(None, "study1", raw_df))
     zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     names = set(zf.namelist())
-    assert names == {
+    assert {
         "meta_study.txt",
         "meta_clinical_patient.txt",
         "data_clinical_patient.txt",
         "meta_clinical_sample.txt",
         "data_clinical_sample.txt",
-    }
+    } <= names
 
     patient = zf.read("data_clinical_patient.txt").decode().rstrip("\n").split("\n")
     sample = zf.read("data_clinical_sample.txt").decode().rstrip("\n").split("\n")
@@ -187,3 +191,173 @@ def test_study_folder_meta_files_reference_data(monkeypatch):
 
     meta_study = zf.read("meta_study.txt").decode()
     assert "cancer_study_identifier:" in meta_study
+
+
+def test_study_folder_includes_case_list_and_license(monkeypatch):
+    raw_df = pd.DataFrame(
+        {
+            "subject": ["p1", "p1", "p2"],
+            "samp": ["s1", "s2", "s3"],
+            "gender": ["male", "male", "female"],
+        }
+    )
+    mappings = [
+        {"raw_column": "subject", "matched_field": "PATIENT_ID", "status": "accepted"},
+        {"raw_column": "samp", "matched_field": "SAMPLE_ID", "status": "accepted"},
+        {"raw_column": "gender", "matched_field": "SEX", "status": "accepted"},
+    ]
+    _patch_repos(monkeypatch, mappings, {"name": "Study Y"})
+
+    zip_bytes = asyncio.run(exporter.export_cbioportal_study(None, "study1", raw_df))
+    zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    names = set(zf.namelist())
+    assert "case_lists/cases_all.txt" in names
+    assert "LICENSE" in names
+
+    case_list = zf.read("case_lists/cases_all.txt").decode()
+    assert "stable_id: study_y_all" in case_list
+    assert "case_list_ids: s1\ts2\ts3" in case_list
+    # No add_global_case_list (would collide with the explicit list).
+    assert "add_global_case_list" not in zf.read("meta_study.txt").decode()
+
+
+def test_study_folder_applies_value_rewrites(monkeypatch):
+    raw_df = pd.DataFrame(
+        {
+            "subject": ["p1", "p2"],
+            "samp": ["s1", "s2"],
+            "gender": ["male", "female"],
+        }
+    )
+    mappings = [
+        {"raw_column": "subject", "matched_field": "PATIENT_ID", "status": "accepted"},
+        {"raw_column": "samp", "matched_field": "SAMPLE_ID", "status": "accepted"},
+        {"raw_column": "gender", "matched_field": "SEX", "status": "accepted"},
+    ]
+    # Curator confirmed male->Male, female->Female for the SEX field.
+    ontology = [
+        {"field_name": "SEX", "raw_value": "male", "ontology_term": "Male",
+         "ontology_id": None, "status": "accepted", "curator_term": None, "confidence_score": 1.0},
+        {"field_name": "SEX", "raw_value": "female", "ontology_term": "Female",
+         "ontology_id": None, "status": "accepted", "curator_term": None, "confidence_score": 1.0},
+    ]
+    _patch_repos(monkeypatch, mappings, {"name": "Study Z"}, ontology)
+
+    zip_bytes = asyncio.run(exporter.export_cbioportal_study(None, "study1", raw_df))
+    zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    patient = zf.read("data_clinical_patient.txt").decode().rstrip("\n").split("\n")
+    # SEX is patient-level; rows 5 (header ids) then data — values rewritten.
+    assert patient[4].split("\t") == ["PATIENT_ID", "SEX"]
+    sexes = {patient[5].split("\t")[1], patient[6].split("\t")[1]}
+    assert sexes == {"Male", "Female"}
+
+
+# ---------------------------------------------------------------------------
+# Labeled dataset export (G9 data loop)
+# ---------------------------------------------------------------------------
+
+
+def test_labeled_dataset_csv_has_accepted_rows(monkeypatch):
+    raw_df = pd.DataFrame({"gender": ["male", "female"], "tissue": ["lung", "liver"]})
+    mappings = [
+        {"raw_column": "gender", "matched_field": "SEX", "curator_field": None,
+         "status": "accepted", "confidence_score": 0.99, "stage": "stage1", "method": "std_exact"},
+        # Rejected — must NOT appear in the labeled set.
+        {"raw_column": "tissue", "matched_field": "BODY_SITE", "curator_field": None,
+         "status": "rejected", "confidence_score": 0.4, "stage": "stage3", "method": "semantic"},
+    ]
+    ontology = [
+        {"field_name": "BODY_SITE", "raw_value": "stool", "ontology_term": "feces",
+         "ontology_id": "UBERON:0001988", "status": "accepted", "curator_term": None,
+         "confidence_score": 1.0},
+    ]
+    _patch_repos(monkeypatch, mappings, {"name": "S", "schema_version_id": 2}, ontology)
+
+    csv_text = asyncio.run(exporter.export_labeled_dataset(None, "study1", raw_df, "csv"))
+    lines = csv_text.rstrip("\n").split("\n")
+    header = lines[0].split(",")
+    assert header == exporter.LABELED_FIELDNAMES
+    # 1 accepted schema mapping + 1 accepted ontology mapping = 2 data rows.
+    assert len(lines) == 1 + 2
+    body = csv_text
+    assert "schema_mapping,gender" in body
+    assert "SEX" in body
+    assert "ontology_mapping,BODY_SITE" in body
+    assert "UBERON:0001988" in body
+    assert "feces" in body
+    # schema_version stamped.
+    assert ",2," in body
+    # rejected mapping excluded.
+    assert "rejected" not in body
+
+
+def test_labeled_dataset_jsonl(monkeypatch):
+    import json
+
+    raw_df = pd.DataFrame({"gender": ["male", "female"]})
+    mappings = [
+        {"raw_column": "gender", "matched_field": "SEX", "curator_field": None,
+         "status": "accepted", "confidence_score": 0.99, "stage": "stage1", "method": "std_exact"},
+    ]
+    _patch_repos(monkeypatch, mappings, {"name": "S", "schema_version_id": 1})
+
+    jsonl = asyncio.run(exporter.export_labeled_dataset(None, "study1", raw_df, "jsonl"))
+    records = [json.loads(ln) for ln in jsonl.rstrip("\n").split("\n")]
+    assert len(records) == 1
+    assert records[0]["record_type"] == "schema_mapping"
+    assert records[0]["accepted_target"] == "SEX"
+    assert records[0]["raw_sample_values"] == "male;female"
+
+
+# ---------------------------------------------------------------------------
+# LinkML gate via the exporter (parses the generated TSV)
+# ---------------------------------------------------------------------------
+
+
+def test_linkml_check_passes_on_clean_export(monkeypatch):
+    raw_df = pd.DataFrame(
+        {
+            "subject": ["p1", "p2"],
+            "samp": ["s1", "s2"],
+            "gender": ["male", "female"],
+        }
+    )
+    mappings = [
+        {"raw_column": "subject", "matched_field": "PATIENT_ID", "status": "accepted"},
+        {"raw_column": "samp", "matched_field": "SAMPLE_ID", "status": "accepted"},
+        {"raw_column": "gender", "matched_field": "SEX", "status": "accepted"},
+    ]
+    # Curator resolved the SEX values to the controlled vocabulary.
+    ontology = [
+        {"field_name": "SEX", "raw_value": "male", "ontology_term": "Male",
+         "ontology_id": None, "status": "accepted", "curator_term": None, "confidence_score": 1.0},
+        {"field_name": "SEX", "raw_value": "female", "ontology_term": "Female",
+         "ontology_id": None, "status": "accepted", "curator_term": None, "confidence_score": 1.0},
+    ]
+    _patch_repos(monkeypatch, mappings, {"name": "S"}, ontology)
+
+    result = asyncio.run(exporter.linkml_check(None, "study1", raw_df))
+    assert result["ok"] is True
+    assert result["violations"] == []
+
+
+def test_linkml_check_flags_unresolved_values(monkeypatch):
+    raw_df = pd.DataFrame(
+        {
+            "subject": ["p1", "p2"],
+            "samp": ["s1", "s2"],
+            "gender": ["male", "female"],  # not resolved to Male/Female
+        }
+    )
+    mappings = [
+        {"raw_column": "subject", "matched_field": "PATIENT_ID", "status": "accepted"},
+        {"raw_column": "samp", "matched_field": "SAMPLE_ID", "status": "accepted"},
+        {"raw_column": "gender", "matched_field": "SEX", "status": "accepted"},
+    ]
+    _patch_repos(monkeypatch, mappings, {"name": "S"})
+
+    result = asyncio.run(exporter.linkml_check(None, "study1", raw_df))
+    assert result["ok"] is False
+    bad = {v["value"] for v in result["violations"]}
+    assert bad == {"male", "female"}
+
