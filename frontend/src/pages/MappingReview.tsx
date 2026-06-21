@@ -13,6 +13,7 @@ import {
   XCircle,
   Clock,
   Sparkles,
+  Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfidenceBadge from '../components/ConfidenceBadge';
@@ -67,6 +68,11 @@ export default function MappingReview() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>(initialStatus);
   const [sortKey, setSortKey] = useState<SortKey>('confidence_score');
   const [sortAsc, setSortAsc] = useState(false);
+  const [search, setSearch] = useState('');
+
+  // Keyboard navigation: index of the focused row within the filtered list.
+  const [cursor, setCursor] = useState(0);
+  const searchRef = React.useRef<HTMLInputElement>(null);
 
   // Edit modal
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -99,6 +105,14 @@ export default function MappingReview() {
     let result = [...mappings];
     if (filterStage !== 'all') result = result.filter((m) => m.stage === filterStage);
     if (filterStatus !== 'all') result = result.filter((m) => m.status === filterStatus);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(
+        (m) =>
+          m.raw_column.toLowerCase().includes(q) ||
+          (m.curator_field || m.matched_field || '').toLowerCase().includes(q),
+      );
+    }
     result.sort((a, b) => {
       let av: any = a[sortKey];
       let bv: any = b[sortKey];
@@ -108,7 +122,7 @@ export default function MappingReview() {
       return sortAsc ? av - bv : bv - av;
     });
     return result;
-  }, [mappings, filterStage, filterStatus, sortKey, sortAsc]);
+  }, [mappings, filterStage, filterStatus, sortKey, sortAsc, search]);
 
   // Per-stage counts for the distribution bar (full study, not the filtered view).
   const stageCounts = useMemo(() => {
@@ -230,6 +244,68 @@ export default function MappingReview() {
       setSortAsc(false);
     }
   };
+
+  const openEdit = (m: Mapping) => {
+    setEditingId(m.id);
+    setEditField(m.curator_field || m.matched_field || '');
+    setEditNote('');
+  };
+
+  // Keep the cursor within bounds when the filtered list changes.
+  useEffect(() => {
+    setCursor((c) => Math.min(Math.max(0, c), Math.max(0, filteredMappings.length - 1)));
+  }, [filteredMappings.length]);
+
+  // Keyboard shortcuts: j/k move, a/r accept/reject, e edit, x select, Enter
+  // expand, / focus search. Ignored while typing in a field or a modal is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      if (e.key === '/' && !typing) {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
+      if (typing || editingId !== null) return;
+      const list = filteredMappings;
+      if (!list.length) return;
+      const cur = list[Math.min(cursor, list.length - 1)];
+      switch (e.key) {
+        case 'j':
+          e.preventDefault();
+          setCursor((c) => Math.min(c + 1, list.length - 1));
+          break;
+        case 'k':
+          e.preventDefault();
+          setCursor((c) => Math.max(c - 1, 0));
+          break;
+        case 'a':
+          if (cur && cur.status !== 'accepted') { e.preventDefault(); handleAccept(cur.id); }
+          break;
+        case 'r':
+          if (cur && cur.status !== 'rejected') { e.preventDefault(); handleReject(cur.id); }
+          break;
+        case 'e':
+          if (cur) { e.preventDefault(); openEdit(cur); }
+          break;
+        case 'x':
+          if (cur) { e.preventDefault(); toggleSelect(cur.id); }
+          break;
+        case 'Enter':
+          if (cur) { e.preventDefault(); setExpandedRow((r) => (r === cur.id ? null : cur.id)); }
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [filteredMappings, cursor, editingId]);
+
+  // Scroll the focused row into view as the cursor moves.
+  useEffect(() => {
+    const el = document.querySelector(`[data-row-cursor="true"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [cursor]);
 
   // No study selected
   if (!selectedId) {
@@ -382,10 +458,28 @@ export default function MappingReview() {
             <option value="unmapped">Unmapped</option>
           </select>
         </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+          <input
+            ref={searchRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search columns…  ( / )"
+            className="w-48 rounded border border-gray-200 py-1 pl-7 pr-2 text-sm focus:border-primary-400 focus:outline-none"
+          />
+        </div>
         <span className="text-xs text-gray-400 ml-auto">
           {filteredMappings.length} of {mappings.length} shown
         </span>
       </div>
+
+      {/* Keyboard hint */}
+      <p className="-mt-2 px-1 text-[11px] text-gray-400">
+        Shortcuts: <kbd className="rounded bg-gray-100 px-1">j</kbd>/<kbd className="rounded bg-gray-100 px-1">k</kbd> move ·
+        <kbd className="rounded bg-gray-100 px-1">a</kbd> accept · <kbd className="rounded bg-gray-100 px-1">r</kbd> reject ·
+        <kbd className="rounded bg-gray-100 px-1">e</kbd> edit · <kbd className="rounded bg-gray-100 px-1">x</kbd> select ·
+        <kbd className="rounded bg-gray-100 px-1">Enter</kbd> details · <kbd className="rounded bg-gray-100 px-1">/</kbd> search
+      </p>
 
       {/* Table */}
       {loading ? (
@@ -418,12 +512,14 @@ export default function MappingReview() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredMappings.map((m) => (
+              {filteredMappings.map((m, idx) => (
                 <React.Fragment key={m.id}>
                   <tr
+                    data-row-cursor={idx === cursor ? 'true' : undefined}
+                    onClick={() => setCursor(idx)}
                     className={`hover:bg-gray-50 transition-colors ${
-                      selected.has(m.id) ? 'bg-primary-50' : ''
-                    }`}
+                      idx === cursor ? 'ring-2 ring-inset ring-primary-400' : ''
+                    } ${selected.has(m.id) ? 'bg-primary-50' : ''}`}
                   >
                     <td className="px-3 py-2.5">
                       <input
@@ -471,10 +567,7 @@ export default function MappingReview() {
                           </button>
                         )}
                         <button
-                          onClick={() => {
-                            setEditingId(m.id);
-                            setEditField(m.curator_field || m.matched_field || '');
-                          }}
+                          onClick={() => openEdit(m)}
                           className="p-1 rounded hover:bg-blue-100 text-blue-600"
                           title="Edit"
                         >
