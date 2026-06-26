@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { FileSpreadsheet, ArrowRight, CircleCheck, CheckCircle2, AlertTriangle, X } from 'lucide-react';
@@ -142,9 +143,9 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
       </Card>
 
       {/* Confirm before finalizing */}
-      {confirming && (
+      {confirming && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-20"
           onClick={() => setConfirming(false)}
         >
           <div
@@ -186,7 +187,8 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </motion.div>
   );

@@ -511,7 +511,7 @@ export default function OntologyReview() {
                                 <li key={`${r.raw}-${i}`} className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs">
                                   <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-500 line-through">{r.raw}</span>
                                   <ArrowRight className="h-3 w-3 text-slate-400" />
-                                  <span className="rounded bg-blue-50 px-1.5 py-0.5 font-mono font-semibold text-blue-700">{r.term}</span>
+                                  <span className="rounded bg-green-50 px-1.5 py-0.5 font-mono font-semibold text-green-700">{r.term}</span>
                                   {r.ontId && <span className="text-[10px] text-slate-400">{r.ontId}</span>}
                                 </li>
                               ))}

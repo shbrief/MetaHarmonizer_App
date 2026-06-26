@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { CircleCheck, AlertTriangle, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -64,9 +65,9 @@ export default function CompleteStudyButton({
         Complete
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-20"
           onClick={() => !complete.isPending && setOpen(false)}
         >
           <div
@@ -114,7 +115,8 @@ export default function CompleteStudyButton({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
