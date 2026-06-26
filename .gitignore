@@ -16,6 +16,14 @@ venv/
 env/
 .env/
 
+# Secrets / local env files (never commit real secrets)
+.env
+*.env
+!.env.example
+!.env.public.example
+backend/.env
+backend/*.env
+
 # IDE
 .vscode/
 .idea/
@@ -55,6 +63,11 @@ GSOC_Proposal.pdf
 SYSTEM_OVERVIEW.md
 MEETING_PREP*.md
 MENTOR_QUESTIONS.md
+docs/presentation-prep.md
+docs/meeting-prep.md
+
+# Local-only schema-version uploads (runtime artifacts)
+backend/data/schema/versions/
 
 # Logs
 *.log

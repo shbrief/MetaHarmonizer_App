@@ -42,6 +42,8 @@ async def enqueue_harmonize(
     suffix: str,
     curated_path: str,
     owner_id: int | None,
+    mode: str = "both",
+    ontology_columns: list[str] | None = None,
 ) -> None:
     kwargs = dict(
         job_id=job_id,
@@ -50,6 +52,8 @@ async def enqueue_harmonize(
         suffix=suffix,
         curated_path=curated_path,
         owner_id=owner_id,
+        mode=mode,
+        ontology_columns=ontology_columns,
     )
 
     if settings.job_mode == "queue":

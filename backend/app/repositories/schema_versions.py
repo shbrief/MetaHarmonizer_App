@@ -42,6 +42,10 @@ async def get_current(db: AsyncSession) -> SchemaVersion | None:
     ).scalar_one_or_none()
 
 
+async def get_by_id(db: AsyncSession, version_id: int) -> SchemaVersion | None:
+    return await db.get(SchemaVersion, version_id)
+
+
 async def get_by_label(db: AsyncSession, label: str) -> SchemaVersion | None:
     return (
         await db.execute(select(SchemaVersion).where(SchemaVersion.label == label))

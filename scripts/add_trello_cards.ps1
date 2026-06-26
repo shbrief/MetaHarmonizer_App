@@ -82,6 +82,30 @@ $cards += @{ phase="Phase A"; title="Spec v2 cleanup + scope finalize";
     "Remove resolved open-question wording",
     "Confirm Web-UI scope items are reflected"
   )}
+$cards += @{ phase="Phase A"; title="cBioPortal curation-team follow-ups (Sehyun<->Ritika Slack)";
+  goal="Track the open items surfaced in the Sehyun<->Ritika (cBioPortal curation team) Slack thread so they are not forgotten: keep the data dictionary open/extensible, decide which extra attributes are ontology-backed, and track the experimental attribute-suggester.";
+  acc="Each item has an owner + answer: (a) schema stays open via G6/U9; (b) curators confirm which fields use which ontology before FIELD_ONTOLOGY is extended; (c) attribute-suggester tracked as experimental, built only if curators ask.";
+  trace="G6, U9, U5, F-11, F-12";
+  tasks=@(
+    "(a) Treat cbioportal_data_dictionary.csv as a SUBSET, not closed (Ritika); keep schema open via G6 diff + U9 admin upload",
+    "(b) Get curators' answer: which allowedvalues enums / free-text fields use which ontology (e.g. PRIMARY_SITE -> UBERON; recurrence|...|primary -> ontology terms) BEFORE extending FIELD_ONTOLOGY",
+    "(b) Note constraint: ontologies beyond NCIt/UBERON/OncoTree (EFO, HANCESTRO) are engine deps (registry root / new category), not app config",
+    "Confirm survival elements OS_*/PFS/DFS in-scope (already in plan section 1.5)",
+    "(c) Track experimental 'suggest new attributes' module (FieldSuggester F-12) - build only if curators ask"
+  )}
+$cards += @{ phase="Phase A"; title="Sehyun app-capability follow-ups (target schema, mapper modes, public deploy)";
+  goal="Track Sehyun's 2026-06 follow-up questions about app capabilities, with grounded status so each is answered or scheduled rather than forgotten.";
+  acc="Each question has a status: built / partial / new feature / env-only. Mapper-mode toggle + column-scoped ontology run scoped as new features; SchemaRegistry alias delivery confirmed as an engine-contract item; public-facing deploy profile documented.";
+  trace="U5, U9, G6, U15, F-11, F-12";
+  tasks=@(
+    "(1) Target-schema selection: partial (admin upload + schema_versions + active CURATED_PATH); add per-upload user choice of registered schema (folds into U9/G6)",
+    "(2)/(3) SchemaRegistry 'schema + alias' delivery: app curated_df has columns only; alias dict is engine-side (schema_mapper FIELD_MODEL). Delivering aliases via upload = NEW engine-contract item - confirm with engine team",
+    "(4) Alias-generation tool for user's own schema: agree it lives OUTSIDE the app; app consumes its output",
+    "(5) Show context for term selection in Mapping Review (linked columns/row values to disambiguate) - UI enhancement, new",
+    "(6) Run-mode toggle SchemaMapper-only / OntologyMapper-only / both: NEW - add mode param to harmonize request; _run_pipeline currently always runs both in sequence",
+    "(7) Run OntologyMapper on specified column(s) only: overlaps U5; OntoMapEngine supports per-column scoping; add column-scoped request path + UI",
+    "(8) Two deployments (cBioPortal + public) w/ input-size cap: already supported via env (MAX_UPLOAD_MB default 50 + AUTH_MODE=none + anon rate limits); document as deploy profile (U15). Confirm if public also needs a row-count cap"
+  )}
 
 Write-Host "Adding $($cards.Count) gap-filling cards..." -ForegroundColor Cyan
 $n=0

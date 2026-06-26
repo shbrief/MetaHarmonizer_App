@@ -17,6 +17,7 @@ import { ArrowRight, Columns3, Gauge, ListChecks, Layers, Wrench, CheckCircle2, 
 import { getQualityMetrics, getStudyMappings } from '../api/client';
 import { useStudies } from '../hooks/queries';
 import PageHeader from '../components/ui/PageHeader';
+import CompleteStudyButton from '../components/CompleteStudyButton';
 import { Card, CardBody } from '../components/ui/Card';
 import { LoadingBlock } from '../components/ui/Feedback';
 import AnimatedNumber from '../components/ui/AnimatedNumber';
@@ -26,10 +27,11 @@ import StudyPicker from '../components/StudyPicker';
 import type { Mapping, QualityMetrics } from '../api/types';
 
 const STAGE_COLORS: Record<string, string> = {
-  stage1: '#2986e2',
-  stage2: '#6366f1',
-  stage3: '#a855f7',
-  stage4: '#17ad84',
+  // Clearly-distinct, colour-blind-safe hues: blue / orange / teal / pink.
+  stage1: '#0072b2',
+  stage2: '#e69f00',
+  stage3: '#009e73',
+  stage4: '#cc79a7',
   unmapped: '#94a3b8',
   invalid: '#f43f5e',
 };
@@ -91,6 +93,7 @@ export default function QualityDashboard() {
       <PageHeader
         title="Quality dashboard"
         description="How this study mapped — coverage, confidence, methods, and what still needs review."
+        actions={studyId ? <CompleteStudyButton studyId={studyId} studyName={studies?.find((s) => s.id === studyId)?.name} size="sm" redirectTo="/quality" /> : undefined}
       />
 
       {/* Readiness banner + export-blocking checklist — the "is it ready?" answer */}
@@ -268,11 +271,12 @@ function pickNeedsReview(mappings: Mapping[]): Mapping[] {
 }
 
 function confColor(minVal: number): string {
-  if (minVal >= 0.8) return '#10b981';
-  if (minVal >= 0.6) return '#84cc16';
-  if (minVal >= 0.4) return '#eab308';
-  if (minVal >= 0.2) return '#f97316';
-  return '#ef4444';
+  // Confidence ramp: green (high) → amber → red (low).
+  if (minVal >= 0.8) return '#16a34a'; // green-600
+  if (minVal >= 0.6) return '#84cc16'; // lime-500
+  if (minVal >= 0.4) return '#eab308'; // amber-500
+  if (minVal >= 0.2) return '#f97316'; // orange-500
+  return '#ef4444'; // red-500
 }
 
 /* ---------- small presentational pieces ---------- */

@@ -14,6 +14,7 @@ arq worker (``queue`` mode) and the inline executor (``inline`` mode). It:
 
 from __future__ import annotations
 
+import functools
 import logging
 
 import anyio
@@ -64,22 +65,70 @@ async def _set_status(study_id: str, status: str) -> None:
         await session.commit()
 
 
-def _run_pipeline(study_id: str, file_path: str, suffix: str, curated_path: str) -> dict:
+def _run_pipeline(
+    study_id: str,
+    file_path: str,
+    suffix: str,
+    curated_path: str,
+    *,
+    mode: str = "both",
+    ontology_columns: list[str] | None = None,
+) -> dict:
     """Synchronous, CPU-heavy engine work — executed in a worker thread.
+
+    ``mode`` selects which mappers run:
+
+    - ``"both"``      : schema mapping then value→ontology mapping (default).
+    - ``"schema"``    : SchemaMapper only — column→field, no ontology pass.
+    - ``"ontology"``  : OntologyMapper only — return just the value→ontology
+                        results. Schema mapping is still run *internally* to
+                        resolve each column's curated field, because the
+                        ontology vocabularies are keyed by curated field (e.g.
+                        ``sex``, ``body_site``) — not by the raw column name.
+                        Without that resolution a column like ``gender`` would
+                        never route to the ``sex`` value dictionary, so the
+                        ontology output would silently differ from ``both``.
+                        The internal schema mappings are not persisted.
+
+    ``ontology_columns`` scopes the ontology pass (in both ``"both"`` and
+    ``"ontology"`` modes): when provided, only those columns are value-mapped.
+    Leave it empty to resolve every column.
 
     Returns the raw engine results; persistence happens back on the event loop
     via async repositories (a worker thread can't use the async session)."""
     sep = "\t" if suffix in (".tsv", ".txt") else ","
     raw_df = pd.read_csv(file_path, sep=sep, low_memory=False)
-    curated_df = pd.read_csv(curated_path, low_memory=False)
 
     engine = get_engine()
-    schema_results = engine.harmonize_schema(raw_df, curated_df, csv_path=file_path)
-    onto_results = engine.map_values(raw_df, schema_results) or []
+    scope = {c.strip() for c in (ontology_columns or []) if c and c.strip()}
+
+    schema_results: list[dict] = []
+    onto_results: list[dict] = []
+
+    # Schema mapping is needed for every mode except a pure ontology run with no
+    # work — even "ontology" needs it to resolve each column's curated field so
+    # the value pass routes to the right vocabulary (consistent with "both").
+    schema_all: list[dict] = []
+    if mode in ("both", "schema", "ontology"):
+        curated_df = pd.read_csv(curated_path, low_memory=False)
+        schema_all = engine.harmonize_schema(raw_df, curated_df, csv_path=file_path)
+
+    # Only "both" and "schema" expose the schema mappings to the curator.
+    if mode in ("both", "schema"):
+        schema_results = schema_all
+
+    if mode in ("both", "ontology"):
+        schema_for_onto = schema_all
+        if scope:
+            schema_for_onto = [
+                m for m in schema_all if m.get("raw_column") in scope
+            ]
+        onto_results = engine.map_values(raw_df, schema_for_onto) or []
 
     return {
         "schema_results": schema_results,
         "onto_results": onto_results,
+        "mode": mode,
         "columns": len(schema_results),
         "rows": int(len(raw_df)),
         "ontology_values": len(onto_results),
@@ -94,6 +143,8 @@ async def run_harmonize(
     suffix: str,
     curated_path: str,
     owner_id: int | None = None,
+    mode: str = "both",
+    ontology_columns: list[str] | None = None,
 ) -> None:
     """Execute one harmonize job end-to-end. Never raises — terminal state is
     recorded in job_runs and broadcast on the bus."""
@@ -110,12 +161,25 @@ async def run_harmonize(
         await _emit(study_id, stage="parse", message="Reading file", pct=10)
 
         await _set_status(study_id, "processing")
-        await _emit(study_id, stage="schema", message="Mapping columns to schema", pct=30)
+        _schema_msg = (
+            "Resolving ontology terms"
+            if mode == "ontology"
+            else "Mapping columns to schema"
+        )
+        await _emit(study_id, stage="schema", message=_schema_msg, pct=30)
 
         # Heavy engine work off the event loop; re-check cancel before & after.
         await _checkpoint(study_id)
         result = await anyio.to_thread.run_sync(
-            _run_pipeline, study_id, file_path, suffix, curated_path
+            functools.partial(
+                _run_pipeline,
+                study_id,
+                file_path,
+                suffix,
+                curated_path,
+                mode=mode,
+                ontology_columns=ontology_columns,
+            )
         )
         await _checkpoint(study_id)
 

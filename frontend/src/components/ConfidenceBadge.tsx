@@ -5,8 +5,9 @@ interface Props {
 }
 
 /**
- * Colour-coded confidence badge:
- *  >=0.9 green (auto-accept), 0.5-0.9 yellow (review), <0.5 red (low)
+ * Colour-coded confidence badge (green→amber→red ramp; the High/Med/Low label
+ * is a redundant non-colour cue):
+ *  >=0.9 green (high), 0.5-0.9 amber (review), <0.5 red (low)
  */
 export default function ConfidenceBadge({ score, size = 'md' }: Props) {
   if (score === null || score === undefined) {
@@ -19,7 +20,7 @@ export default function ConfidenceBadge({ score, size = 'md' }: Props) {
     bg = 'bg-green-100 text-green-800';
     text = 'High';
   } else if (score >= 0.5) {
-    bg = 'bg-yellow-100 text-yellow-800';
+    bg = 'bg-amber-100 text-amber-800';
     text = 'Med';
   } else {
     bg = 'bg-red-100 text-red-800';

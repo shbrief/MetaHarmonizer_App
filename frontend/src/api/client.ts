@@ -48,9 +48,41 @@ export async function completeStudy(id: string): Promise<Study> {
 
 /* ---------- Harmonize ---------- */
 
-export async function uploadAndHarmonize(file: File): Promise<HarmonizeAccepted> {
+export type HarmonizeMode = 'both' | 'schema' | 'ontology';
+
+export interface HarmonizeOptions {
+    /** Which mappers to run. Default 'both'. */
+    mode?: HarmonizeMode;
+    /** Registered target-schema version to map against. Omit for current. */
+    schemaVersionId?: number;
+    /** Column allow-list that scopes the ontology pass (required for 'ontology'). */
+    ontologyColumns?: string[];
+}
+
+export interface TargetSchema {
+    id: number;
+    label: string;
+    is_current: boolean;
+    source_path?: string;
+    created_at?: string | null;
+}
+
+/** Registered target schemas the curator can map an upload against. */
+export async function listTargetSchemas(): Promise<TargetSchema[]> {
+    return request<TargetSchema[]>(`${BASE}/schema-versions`);
+}
+
+export async function uploadAndHarmonize(
+    file: File,
+    opts: HarmonizeOptions = {},
+): Promise<HarmonizeAccepted> {
     const form = new FormData();
     form.append('file', file);
+    if (opts.mode) form.append('mode', opts.mode);
+    if (opts.schemaVersionId != null)
+        form.append('schema_version_id', String(opts.schemaVersionId));
+    if (opts.ontologyColumns?.length)
+        form.append('ontology_columns', opts.ontologyColumns.join(','));
     return request<HarmonizeAccepted>(`${BASE}/harmonize`, {
         method: 'POST',
         body: form,
@@ -82,6 +114,26 @@ export interface ReviewQueue {
 }
 export async function getReviewQueue(studyId: string): Promise<ReviewQueue> {
     return request<ReviewQueue>(`${BASE}/mappings/${studyId}/review-queue`);
+}
+
+export interface ColumnContext {
+    study_id: string;
+    column: string;
+    total_rows: number;
+    distinct_values: number;
+    null_count: number;
+    samples: { value: string; count: number }[];
+}
+
+/** Sample distinct values for one raw column — context to help pick a term. */
+export async function getColumnContext(
+    studyId: string,
+    column: string,
+    limit = 15,
+): Promise<ColumnContext> {
+    return request<ColumnContext>(
+        `${BASE}/mappings/${studyId}/columns/${encodeURIComponent(column)}/context?limit=${limit}`,
+    );
 }
 
 export async function acceptMapping(mappingId: number): Promise<Mapping> {
@@ -191,6 +243,14 @@ export function getExportUrl(
     format: 'harmonized' | 'cbioportal' | 'cbioportal-study' | 'report',
 ): string {
     return `${BASE}/export/${studyId}/${format}`;
+}
+
+/** Labeled-dataset export (confirmed mappings) — CSV or JSONL (G9). */
+export function getLabeledExportUrl(
+    studyId: string,
+    format: 'csv' | 'jsonl' = 'csv',
+): string {
+    return `${BASE}/export/${studyId}/labeled?format=${format}`;
 }
 
 /* ---------- Audit (admin) ---------- */

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { FileSpreadsheet, ArrowRight, CircleCheck, CheckCircle2 } from 'lucide-react';
+import { FileSpreadsheet, ArrowRight, CircleCheck, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Study } from '../api/types';
 import { Card } from './ui/Card';
@@ -49,9 +49,11 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
   const complete = useCompleteStudy();
   const { dismiss } = useJobs();
   const [celebrating, setCelebrating] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const onComplete = () => {
     if (celebrating) return;
+    setConfirming(false);
     setCelebrating(true);
     // Let the celebration play, then mark complete (the exit animates as the
     // study leaves the work list) and clear it from the bottom job tray.
@@ -128,7 +130,7 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
           </p>
           <button
             type="button"
-            onClick={onComplete}
+            onClick={() => setConfirming(true)}
             disabled={celebrating}
             title="Mark complete and remove this study"
             className="group/btn inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:shadow active:scale-95 disabled:opacity-60"
@@ -138,6 +140,54 @@ export default function StudyListCard({ study, basePath }: { study: Study; baseP
           </button>
         </div>
       </Card>
+
+      {/* Confirm before finalizing */}
+      {confirming && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setConfirming(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 text-left shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600">
+                <AlertTriangle className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-slate-900">Complete this study?</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Completing <span className="font-semibold">{study.name}</span> finalizes it and
+                  removes it from your active work list. This <span className="font-semibold">cannot be undone</span> from here.
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Download every export you need <span className="font-semibold">before</span> completing.
+                </p>
+              </div>
+              <button
+                onClick={() => setConfirming(false)}
+                className="ml-auto rounded-lg p-1 text-slate-400 hover:bg-slate-100"
+                aria-label="Cancel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setConfirming(false)} className="btn-secondary btn-sm">
+                Cancel
+              </button>
+              <button
+                onClick={onComplete}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                <CircleCheck className="h-4 w-4" />
+                Complete study
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

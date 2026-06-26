@@ -14,6 +14,8 @@ import {
   HelpCircle,
   Plus,
   Sparkles,
+  ArrowRight,
+  Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -30,6 +32,7 @@ import StatusBadge from '../components/StatusBadge';
 import PageHeader from '../components/ui/PageHeader';
 import StudyPicker from '../components/StudyPicker';
 import StudyGate, { isStudyReady } from '../components/StudyGate';
+import CompleteStudyButton from '../components/CompleteStudyButton';
 import { Card, CardBody } from '../components/ui/Card';
 import type { OntologyMapping, OntologySearchResult } from '../api/types';
 
@@ -50,6 +53,8 @@ export default function OntologyReview() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showUnmatched, setShowUnmatched] = useState(false);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
+  // Live "what the export will write" preview — before→after per field.
+  const [showPreview, setShowPreview] = useState(false);
   // Per-field "show all unmatched values" toggle.
   const [expandedFields, setExpandedFields] = useState<Record<string, boolean>>({});
 
@@ -180,6 +185,27 @@ export default function OntologyReview() {
     pending: matched.filter((m) => m.status === 'pending').length,
     unmatched: unmatched.length,
   }), [matched, unmatched]);
+
+  // Live export preview: the value rewrites that will be applied on export —
+  // exactly the accepted `raw_value -> confirmed term` per field. Recomputes
+  // instantly as the curator accepts/edits, so they see the effect before
+  // exporting (the raw upload itself is never mutated).
+  const rewritePreview = useMemo(() => {
+    const byField: Record<string, { raw: string; term: string; ontId: string | null }[]> = {};
+    for (const m of matched) {
+      if (m.status !== 'accepted') continue;
+      const term = m.curator_term ?? m.ontology_term;
+      if (!term) continue;
+      (byField[m.field_name] ??= []).push({
+        raw: m.raw_value,
+        term,
+        ontId: m.curator_id ?? m.ontology_id ?? null,
+      });
+    }
+    return byField;
+  }, [matched]);
+  const previewFieldCount = Object.keys(rewritePreview).length;
+  const previewValueCount = Object.values(rewritePreview).reduce((n, v) => n + v.length, 0);
 
   // Ask the backend to search the ontology index for every unmatched value
   //  and return high-confidence candidates — a single request (the server does
@@ -425,6 +451,7 @@ export default function OntologyReview() {
       <PageHeader
         title="Ontology review"
         description="Curate the controlled-vocabulary terms the engine assigned to each categorical value."
+        actions={selectedId ? <CompleteStudyButton studyId={selectedId} studyName={selectedStudy?.name} size="sm" redirectTo="/ontology" /> : undefined}
       />
 
       {loading ? (
@@ -449,6 +476,54 @@ export default function OntologyReview() {
             </Card>
           ) : (
             <>
+              {/* Live export preview — before → after of accepted rewrites */}
+              <Card>
+                <CardBody className="py-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowPreview((v) => !v)}
+                    className="flex w-full items-center justify-between gap-3 text-left"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Eye className="h-4 w-4 text-primary-500" />
+                      <span className="text-sm font-semibold text-slate-900">Resolved values preview</span>
+                      <span className="text-xs text-slate-500">
+                        {previewValueCount} value{previewValueCount !== 1 ? 's' : ''} across {previewFieldCount} field{previewFieldCount !== 1 ? 's' : ''} will be rewritten on export
+                      </span>
+                    </span>
+                    {showPreview ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                  </button>
+
+                  {showPreview && (
+                    previewValueCount === 0 ? (
+                      <p className="mt-3 text-xs text-slate-400">
+                        Accept ontology terms to see how your data values will be rewritten. The raw upload is never changed — these rewrites are applied to the table you export.
+                      </p>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        {Object.entries(rewritePreview).map(([field, rows]) => (
+                          <div key={field} className="rounded-lg border border-slate-200">
+                            <div className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">
+                              {field} <span className="font-normal text-slate-400">· {rows.length} value{rows.length !== 1 ? 's' : ''}</span>
+                            </div>
+                            <ul className="divide-y divide-slate-100">
+                              {rows.map((r, i) => (
+                                <li key={`${r.raw}-${i}`} className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs">
+                                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-500 line-through">{r.raw}</span>
+                                  <ArrowRight className="h-3 w-3 text-slate-400" />
+                                  <span className="rounded bg-blue-50 px-1.5 py-0.5 font-mono font-semibold text-blue-700">{r.term}</span>
+                                  {r.ontId && <span className="text-[10px] text-slate-400">{r.ontId}</span>}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  )}
+                </CardBody>
+              </Card>
+
               {/* Status filter */}
               <div className="flex flex-wrap items-center gap-2">
                 {(['all', 'pending', 'accepted', 'rejected'] as StatusFilter[]).map((f) => (

@@ -1,19 +1,15 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { Download, FileText, Database, FileJson, FolderArchive, CircleCheck } from 'lucide-react';
-import { toast } from 'sonner';
-import { getExportUrl } from '../api/client';
-import { useCompleteStudy, useStudies } from '../hooks/queries';
-import { useJobs } from '../context/JobsContext';
+import { Download, FileText, Database, FileJson, FolderArchive, Tags } from 'lucide-react';
+import { getExportUrl, getLabeledExportUrl } from '../api/client';
+import { useStudies } from '../hooks/queries';
 import PageHeader from '../components/ui/PageHeader';
 import { Card, CardBody } from '../components/ui/Card';
 import StudyPicker from '../components/StudyPicker';
+import CompleteStudyButton from '../components/CompleteStudyButton';
 
 export default function ExportPage() {
   const { studyId } = useParams<{ studyId: string }>();
-  const navigate = useNavigate();
   const { data: studies, isLoading } = useStudies();
-  const complete = useCompleteStudy();
-  const { dismiss } = useJobs();
 
   if (!studyId) {
     return (
@@ -60,18 +56,6 @@ export default function ExportPage() {
     },
   ];
 
-  const onComplete = () => {
-    if (!studyId) return;
-    complete.mutate(studyId, {
-      onSuccess: () => {
-        dismiss(studyId);
-        toast.success('Study completed');
-        navigate('/export');
-      },
-      onError: () => toast.error('Could not complete study'),
-    });
-  };
-
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
@@ -104,6 +88,33 @@ export default function ExportPage() {
             </CardBody>
           </Card>
         ))}
+
+        {/* Labeled dataset (G9) — confirmed mappings as a training corpus */}
+        <Card className="transition hover:shadow-card">
+          <CardBody className="flex items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-600">
+                <Tags className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Labeled Dataset</h3>
+                <p className="mt-1 max-w-md text-xs text-slate-500">
+                  Curator-confirmed mappings only — a labeled corpus for engine training/evaluation.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <a href={getLabeledExportUrl(studyId, 'csv')} download className="btn-secondary btn-sm">
+                <Download className="h-4 w-4" />
+                CSV
+              </a>
+              <a href={getLabeledExportUrl(studyId, 'jsonl')} download className="btn-secondary btn-sm">
+                <Download className="h-4 w-4" />
+                JSONL
+              </a>
+            </div>
+          </CardBody>
+        </Card>
       </div>
 
       {/* Study lifecycle action — completing files the study away */}
@@ -112,15 +123,7 @@ export default function ExportPage() {
           Completing files this study away — it still counts on the dashboard but leaves
           your work list. Studies left incomplete are auto-removed after a week.
         </p>
-        <button
-          onClick={onComplete}
-          disabled={complete.isPending}
-          title="Mark this study complete"
-          className="group/btn inline-flex shrink-0 items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:shadow active:scale-95 disabled:opacity-60"
-        >
-          <CircleCheck className="h-4 w-4 transition group-hover/btn:scale-110" />
-          Complete
-        </button>
+        <CompleteStudyButton studyId={studyId} studyName={study?.name} redirectTo="/export" />
       </div>
     </div>
   );

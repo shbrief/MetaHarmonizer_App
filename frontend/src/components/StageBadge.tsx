@@ -4,10 +4,12 @@ interface Props {
 }
 
 const STAGE_LABELS: Record<string, { label: string; color: string }> = {
+  // Clearly-distinct, colour-blind-safe categorical hues (blue / orange / teal /
+  // pink — no blue→blue or blue→purple ramps). S1–S4 text is a redundant cue.
   stage1: { label: 'S1 Dict/Fuzzy', color: 'bg-blue-100 text-blue-800' },
-  stage2: { label: 'S2 Value/Ontology', color: 'bg-indigo-100 text-indigo-800' },
-  stage3: { label: 'S3 Semantic', color: 'bg-purple-100 text-purple-800' },
-  stage4: { label: 'S4 LLM', color: 'bg-orange-100 text-orange-800' },
+  stage2: { label: 'S2 Value/Ontology', color: 'bg-orange-100 text-orange-800' },
+  stage3: { label: 'S3 Semantic', color: 'bg-teal-100 text-teal-800' },
+  stage4: { label: 'S4 LLM', color: 'bg-pink-100 text-pink-800' },
   invalid: { label: 'Invalid', color: 'bg-red-100 text-red-700' },
   unmapped: { label: 'Unmapped', color: 'bg-gray-100 text-gray-600' },
 };

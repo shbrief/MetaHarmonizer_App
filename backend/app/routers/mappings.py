@@ -239,6 +239,60 @@ async def llm_rematch(
 
 
 # ---------------------------------------------------------------------------
+# Column context — sample values to help a curator pick the right term
+# ---------------------------------------------------------------------------
+
+@router.get("/{study_id}/columns/{column}/context")
+async def get_column_context(
+    study_id: str,
+    column: str,
+    limit: int = 15,
+    user=Depends(require_role("curator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return sample distinct values for one raw column of a study.
+
+    Context helps disambiguate a mapping: seeing the actual cell values (and how
+    often each occurs) is often what tells a curator whether a column is, say, a
+    body site vs a sample type. Read directly from the stored upload, capped so
+    a huge column can't blow up the response.
+    """
+    import pandas as pd
+
+    study = await studies_repo.get_study(db, study_id)
+    if not study or not study.get("file_path"):
+        raise HTTPException(status_code=404, detail="Study CSV not found")
+
+    path = study["file_path"]
+    sep = "\t" if str(path).lower().endswith((".tsv", ".txt")) else ","
+    try:
+        # Only the requested column is read into memory.
+        series = pd.read_csv(path, sep=sep, usecols=[column], dtype=str)[column]
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Column '{column}' not found")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"Failed to read column: {exc}")
+
+    total = int(len(series))
+    non_null = series.dropna()
+    null_count = total - int(len(non_null))
+    counts = non_null.value_counts()
+    limit = max(1, min(limit, 100))
+    samples = [
+        {"value": str(v), "count": int(c)} for v, c in counts.head(limit).items()
+    ]
+
+    return {
+        "study_id": study_id,
+        "column": column,
+        "total_rows": total,
+        "distinct_values": int(counts.shape[0]),
+        "null_count": null_count,
+        "samples": samples,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Field suggestions — expose low-confidence / unmapped columns with alternatives
 # ---------------------------------------------------------------------------
 

@@ -93,9 +93,12 @@ class Settings(BaseSettings):
     rate_limit_window_sec: int = 60
 
     # ── Upload safety (spec §6.4) ───────────────────────────────────────────
-    # Byte-size guard only (prevents a runaway upload filling the disk).
-    # No row/column ceilings — study scale is guidance, not a gate.
+    # Byte-size guard (prevents a runaway upload filling the disk).
     max_upload_mb: int = 50
+    # Optional row ceiling. ``0`` (default) means no row cap — study scale is
+    # guidance, not a gate. A public-facing instance can set a small ceiling
+    # (e.g. MAX_UPLOAD_ROWS=2000) to keep it a demo, not a bulk service.
+    max_upload_rows: int = 0
 
     # ── Data retention (spec §6.8) ──────────────────────────────────────────
     retention_uploads_days: int = 90

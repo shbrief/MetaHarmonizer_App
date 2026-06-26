@@ -22,6 +22,7 @@ import StatusBadge from '../components/StatusBadge';
 import PageHeader from '../components/ui/PageHeader';
 import StudyPicker from '../components/StudyPicker';
 import StudyGate, { isStudyReady } from '../components/StudyGate';
+import CompleteStudyButton from '../components/CompleteStudyButton';
 import { useStudies } from '../hooks/queries';
 import {
   getStudyMappings,
@@ -31,6 +32,8 @@ import {
   batchUpdateMappings,
   llmRematch,
   getReviewQueue,
+  getColumnContext,
+  type ColumnContext,
 } from '../api/client';
 import { ApiError } from '../api/http';
 import type { Mapping } from '../api/types';
@@ -39,16 +42,67 @@ type SortKey = 'raw_column' | 'confidence_score' | 'stage' | 'status';
 type FilterStage = 'all' | 'stage1' | 'stage2' | 'stage3' | 'stage4' | 'invalid' | 'unmapped';
 type FilterStatus = 'all' | 'pending' | 'accepted' | 'rejected';
 
-// Stage display order + colours for the distribution bar (aligned with StageBadge).
+// Stage display order + colours for the distribution bar (colour-blind-safe,
+// aligned with StageBadge: blue / orange / teal / pink — all clearly distinct).
 const STAGE_ORDER = ['stage1', 'stage2', 'stage3', 'stage4', 'invalid', 'unmapped'] as const;
 const STAGE_META: Record<string, { label: string; bar: string }> = {
   stage1: { label: 'S1 Dict/Fuzzy', bar: 'bg-blue-500' },
-  stage2: { label: 'S2 Value/Ontology', bar: 'bg-indigo-500' },
-  stage3: { label: 'S3 Semantic', bar: 'bg-purple-500' },
-  stage4: { label: 'S4 LLM', bar: 'bg-orange-500' },
+  stage2: { label: 'S2 Value/Ontology', bar: 'bg-orange-500' },
+  stage3: { label: 'S3 Semantic', bar: 'bg-teal-500' },
+  stage4: { label: 'S4 LLM', bar: 'bg-pink-500' },
   invalid: { label: 'Invalid', bar: 'bg-red-500' },
   unmapped: { label: 'Unmapped', bar: 'bg-gray-400' },
 };
+
+// Lazily-loaded sample values for a raw column — context that helps a curator
+// decide the correct mapping (Sehyun: "to find the correct term you need context").
+function ColumnContextPanel({ studyId, column }: { studyId: string; column: string }) {
+  const [ctx, setCtx] = useState<ColumnContext | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setErr(null);
+    getColumnContext(studyId, column)
+      .then((c) => alive && setCtx(c))
+      .catch((e) => alive && setErr(e instanceof ApiError ? e.message : 'Failed to load context'))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [studyId, column]);
+
+  if (loading) return <p className="text-gray-400 italic">Loading sample values…</p>;
+  if (err) return <p className="text-gray-400 italic">{err}</p>;
+  if (!ctx) return null;
+
+  return (
+    <div>
+      <p className="text-gray-500">
+        {ctx.total_rows.toLocaleString()} rows · {ctx.distinct_values.toLocaleString()} distinct
+        {ctx.null_count > 0 && <> · {ctx.null_count.toLocaleString()} blank</>}
+      </p>
+      {ctx.samples.length > 0 ? (
+        <ul className="mt-1 flex flex-wrap gap-1.5">
+          {ctx.samples.map((s, i) => (
+            <li
+              key={`${s.value}-${i}`}
+              className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-0.5 ring-1 ring-gray-200"
+              title={`${s.count} row(s)`}
+            >
+              <span className="font-mono text-gray-800">{s.value}</span>
+              <span className="text-gray-400">×{s.count}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-gray-400 italic">No non-empty values</p>
+      )}
+    </div>
+  );
+}
 
 export default function MappingReview() {
   const { studyId } = useParams<{ studyId: string }>();
@@ -401,6 +455,8 @@ export default function MappingReview() {
                 Reject all
               </button>
             </div>
+          ) : selectedId ? (
+            <CompleteStudyButton studyId={selectedId} studyName={selectedStudy?.name} size="sm" redirectTo="/review" />
           ) : undefined
         }
       />
@@ -771,6 +827,16 @@ export default function MappingReview() {
                                 </>
                               )}
                             </dl>
+
+                            {/* Column context — sample values to disambiguate */}
+                            {selectedId && (
+                              <div className="mt-3 border-t border-gray-200 pt-3">
+                                <h4 className="font-semibold text-gray-700 mb-2">
+                                  Column values
+                                </h4>
+                                <ColumnContextPanel studyId={selectedId} column={m.raw_column} />
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
